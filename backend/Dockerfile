@@ -4,9 +4,11 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openslide-tools \
-    libopenslide0 \
+    libopenslide-dev \
     libgl1 \
     libglib2.0-0 \
+    build-essential \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
