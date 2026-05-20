@@ -33,17 +33,39 @@ export default function InferenceResultPage() {
     <div>
       <div className="flex justify-between items-start mb-6">
         <h1 className="text-2xl font-bold">Inference Results</h1>
-        <span
-          className={`px-3 py-1 text-sm rounded-full ${
-            job.status === "complete"
-              ? "bg-green-100 text-green-700"
-              : job.status === "error"
-              ? "bg-red-100 text-red-700"
-              : "bg-yellow-100 text-yellow-700"
-          }`}
-        >
-          {job.status}
-        </span>
+        <div className="flex items-center gap-3">
+          {job.status === "complete" && (
+            <>
+              <a
+                href={`${API_URL}/api/v1/inference/${id}/export/csv`}
+                download
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
+                Export CSV
+              </a>
+              <a
+                href={`${API_URL}/api/v1/inference/${id}/export/pdf`}
+                download
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
+                Export PDF
+              </a>
+            </>
+          )}
+          <span
+            className={`px-3 py-1 text-sm rounded-full ${
+              job.status === "complete"
+                ? "bg-green-100 text-green-700"
+                : job.status === "error"
+                ? "bg-red-100 text-red-700"
+                : "bg-yellow-100 text-yellow-700"
+            }`}
+          >
+            {job.status}
+          </span>
+        </div>
       </div>
 
       {job.status === "running" && (

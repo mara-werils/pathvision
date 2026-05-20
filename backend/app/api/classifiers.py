@@ -1,8 +1,10 @@
 import csv
 import io
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,3 +100,36 @@ async def delete_classifier(classifier_id: uuid.UUID, db: AsyncSession = Depends
     await db.delete(clf)
     await db.commit()
     return {"status": "deleted"}
+
+
+@router.get("/{classifier_id}/export/model")
+async def export_model(classifier_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Download the trained .joblib model file."""
+    clf = await db.get(Classifier, classifier_id)
+    if not clf:
+        raise HTTPException(status_code=404, detail="Classifier not found")
+    if not clf.model_path:
+        raise HTTPException(status_code=404, detail="Model file not available")
+
+    model_path = Path(clf.model_path)
+    if not model_path.exists():
+        # Try Docker path mapping
+        import os
+        if "/pathvision/data/" in clf.model_path:
+            alt = Path("/data/" + clf.model_path.split("/pathvision/data/", 1)[1])
+            if alt.exists():
+                model_path = alt
+        elif clf.model_path.startswith("/data/"):
+            data_dir = os.environ.get("DATA_DIR", "/data")
+            alt = Path(data_dir) / clf.model_path[len("/data/"):]
+            if alt.exists():
+                model_path = alt
+
+    if not model_path.exists():
+        raise HTTPException(status_code=404, detail="Model file not found on disk")
+
+    return FileResponse(
+        str(model_path),
+        media_type="application/octet-stream",
+        filename=f"{clf.name}.joblib",
+    )

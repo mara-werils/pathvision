@@ -32,17 +32,29 @@ export default function ClassifierDetailPage() {
           <h1 className="text-2xl font-bold">{clf.name}</h1>
           {clf.description && <p className="text-sm text-gray-500 mt-1">{clf.description}</p>}
         </div>
-        <span
-          className={`px-3 py-1 text-sm rounded-full ${
-            clf.status === "ready"
-              ? "bg-green-100 text-green-700"
-              : clf.status === "error"
-              ? "bg-red-100 text-red-700"
-              : "bg-yellow-100 text-yellow-700"
-          }`}
-        >
-          {clf.status}
-        </span>
+        <div className="flex items-center gap-3">
+          {clf.status === "ready" && (
+            <a
+              href={`${API_URL}/api/v1/classifiers/${id}/export/model`}
+              download
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
+              Export Model (.joblib)
+            </a>
+          )}
+          <span
+            className={`px-3 py-1 text-sm rounded-full ${
+              clf.status === "ready"
+                ? "bg-green-100 text-green-700"
+                : clf.status === "error"
+                ? "bg-red-100 text-red-700"
+                : "bg-yellow-100 text-yellow-700"
+            }`}
+          >
+            {clf.status}
+          </span>
+        </div>
       </div>
 
       {clf.status === "training" && (

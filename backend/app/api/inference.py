@@ -1,14 +1,20 @@
+import csv
+import io
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
-from sqlalchemy import select
+from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db
+from app.models.classifier import Classifier
 from app.models.inference_job import InferenceJob
+from app.models.patch import Patch
 from app.models.patch_prediction import PatchPrediction
+from app.models.slide import Slide
 from app.schemas.inference import InferenceJobOut, InferenceRequest, PatchPredictionOut
 
 router = APIRouter()
@@ -98,6 +104,169 @@ async def get_confidence_map(job_id: uuid.UUID, db: AsyncSession = Depends(get_d
     if not resolved:
         raise HTTPException(status_code=404, detail="Confidence map not available")
     return FileResponse(str(resolved), media_type="image/png")
+
+
+@router.get("/{job_id}/export/csv")
+async def export_predictions_csv(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Export patch predictions as a CSV file."""
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+
+    result = await db.execute(
+        select(
+            PatchPrediction.patch_id,
+            Patch.x,
+            Patch.y,
+            PatchPrediction.predicted_class,
+            PatchPrediction.predicted_label,
+            PatchPrediction.probabilities,
+        )
+        .join(Patch, PatchPrediction.patch_id == Patch.id)
+        .where(PatchPrediction.inference_job_id == job_id)
+    )
+    rows = result.all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["patch_id", "x", "y", "predicted_class", "predicted_label", "confidence", "probabilities"])
+    for row in rows:
+        probs = row.probabilities if isinstance(row.probabilities, list) else list(row.probabilities.values()) if isinstance(row.probabilities, dict) else []
+        confidence = max(probs) if probs else 0.0
+        writer.writerow([
+            str(row.patch_id),
+            row.x,
+            row.y,
+            row.predicted_class,
+            row.predicted_label,
+            f"{confidence:.4f}",
+            ";".join(f"{p:.4f}" for p in probs),
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=predictions_{job_id}.csv"},
+    )
+
+
+@router.get("/{job_id}/export/pdf")
+async def export_predictions_pdf(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Export a PDF report for inference results."""
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+
+    slide = await db.get(Slide, job.slide_id)
+    classifier = await db.get(Classifier, job.classifier_id)
+
+    # Get prediction counts per class
+    result = await db.execute(
+        select(
+            PatchPrediction.predicted_label,
+            PatchPrediction.predicted_class,
+            func.count().label("count"),
+        )
+        .where(PatchPrediction.inference_job_id == job_id)
+        .group_by(PatchPrediction.predicted_label, PatchPrediction.predicted_class)
+        .order_by(PatchPrediction.predicted_class)
+    )
+    class_counts = result.all()
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20 * mm, bottomMargin=20 * mm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("Title2", parent=styles["Title"], fontSize=22, spaceAfter=12)
+    heading_style = ParagraphStyle("Heading", parent=styles["Heading2"], fontSize=14, spaceAfter=6)
+
+    elements: list = []
+
+    # Title
+    elements.append(Paragraph("PathVision Inference Report", title_style))
+    elements.append(Spacer(1, 6 * mm))
+
+    # Slide info
+    elements.append(Paragraph("Slide Information", heading_style))
+    slide_data = [
+        ["Filename", slide.filename if slide else "N/A"],
+        ["Dimensions", f"{slide.width} x {slide.height}" if slide and slide.width else "N/A"],
+        ["Patch Count", str(slide.tile_count) if slide else "N/A"],
+    ]
+    t = Table(slide_data, colWidths=[120, 300])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f3f4f6")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 6 * mm))
+
+    # Classifier info
+    elements.append(Paragraph("Classifier Information", heading_style))
+    clf_auc = classifier.metrics.get("auc", "N/A") if classifier and classifier.metrics else "N/A"
+    if isinstance(clf_auc, float):
+        clf_auc = f"{clf_auc:.4f}"
+    clf_data = [
+        ["Name", classifier.name if classifier else "N/A"],
+        ["AUC", str(clf_auc)],
+        ["Classes", ", ".join(classifier.class_names) if classifier and classifier.class_names else "N/A"],
+    ]
+    t = Table(clf_data, colWidths=[120, 300])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f3f4f6")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 6 * mm))
+
+    # Summary — class distribution table
+    elements.append(Paragraph("Class Distribution Summary", heading_style))
+    total = sum(row.count for row in class_counts) if class_counts else 0
+    summary_header = ["Class", "Predicted Label", "Count", "Percentage"]
+    summary_rows = [summary_header]
+    for row in class_counts:
+        pct = f"{row.count / total * 100:.1f}%" if total else "0%"
+        summary_rows.append([str(row.predicted_class), row.predicted_label, str(row.count), pct])
+    summary_rows.append(["", "Total", str(total), "100%"])
+
+    t = Table(summary_rows, colWidths=[60, 150, 80, 80])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4f46e5")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e5e7eb")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("PADDING", (0, 0), (-1, -1), 6),
+        ("ALIGN", (2, 0), (-1, -1), "CENTER"),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 6 * mm))
+
+    # Footer
+    elements.append(Paragraph(
+        f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC &bull; Job ID: {job_id}",
+        styles["Normal"],
+    ))
+
+    doc.build(elements)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=report_{job_id}.pdf"},
+    )
 
 
 @router.get("", response_model=list[InferenceJobOut])
