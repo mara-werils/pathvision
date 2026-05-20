@@ -31,3 +31,16 @@ class SlideListOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PatchOut(BaseModel):
+    id: uuid.UUID
+    slide_id: uuid.UUID
+    x: int
+    y: int
+    level: int
+    magnification: Optional[float] = None
+    tissue_fraction: Optional[float] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

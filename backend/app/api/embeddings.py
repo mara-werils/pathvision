@@ -1,8 +1,56 @@
-from fastapi import APIRouter
+import uuid
+
+from celery.result import AsyncResult
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dependencies import get_db
+from app.models.embedding import Embedding
+from app.models.slide import Slide
 
 router = APIRouter()
 
 
+class GenerateRequest(BaseModel):
+    slide_id: uuid.UUID
+
+
 @router.post("/generate")
-async def generate_embeddings():
-    return {"detail": "Not implemented yet — Phase 3"}
+async def generate_embeddings(req: GenerateRequest, db: AsyncSession = Depends(get_db)):
+    slide = await db.get(Slide, req.slide_id)
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
+    if slide.status != "tiled":
+        raise HTTPException(status_code=400, detail=f"Slide must be tiled first (status={slide.status})")
+
+    from app.workers.embed_worker import generate_embeddings as embed_task
+
+    task = embed_task.delay(str(req.slide_id))
+    return {"task_id": task.id, "slide_id": str(req.slide_id)}
+
+
+@router.get("/status/{task_id}")
+async def get_task_status(task_id: str):
+    result = AsyncResult(task_id)
+    if result.state == "PROGRESS":
+        meta = result.info or {}
+        return {
+            "status": "running",
+            "current": meta.get("current", 0),
+            "total": meta.get("total", 0),
+        }
+    if result.state == "SUCCESS":
+        return {"status": "done", "result": result.result}
+    if result.state == "FAILURE":
+        return {"status": "error", "error": str(result.result)}
+    return {"status": result.state}
+
+
+@router.get("/slide/{slide_id}/count")
+async def embedding_count(slide_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    count = await db.scalar(
+        select(func.count(Embedding.id)).where(Embedding.slide_id == slide_id)
+    )
+    return {"slide_id": str(slide_id), "count": count or 0}

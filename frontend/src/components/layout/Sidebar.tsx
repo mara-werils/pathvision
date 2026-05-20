@@ -4,9 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const nav = [
-  { href: "/", label: "Dashboard", icon: "H" },
+  { href: "/", label: "Dashboard", icon: "D" },
   { href: "/slides", label: "Slides", icon: "S" },
   { href: "/classifiers", label: "Classifiers", icon: "C" },
+  { href: "/inference", label: "Inference", icon: "I" },
   { href: "/search", label: "Search", icon: "Q" },
 ];
 
