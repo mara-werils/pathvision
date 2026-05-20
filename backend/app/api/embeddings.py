@@ -48,6 +48,17 @@ async def get_task_status(task_id: str):
     return {"status": result.state}
 
 
+@router.get("/patch/{patch_id}")
+async def get_patch_embedding(patch_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Embedding).where(Embedding.patch_id == patch_id).limit(1)
+    )
+    emb = result.scalar_one_or_none()
+    if not emb:
+        raise HTTPException(status_code=404, detail="No embedding for this patch")
+    return {"patch_id": str(patch_id), "vector": emb.vector}
+
+
 @router.get("/slide/{slide_id}/count")
 async def embedding_count(slide_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     count = await db.scalar(

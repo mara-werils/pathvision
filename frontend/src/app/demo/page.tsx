@@ -44,17 +44,27 @@ export default function DemoPage() {
   const selectPatch = async (patch: Patch) => {
     setSelectedPatch(patch);
     setSimilarPatches([]);
+    setEmbeddingPreview(null);
     setSearching(true);
 
     try {
+      // Fetch embedding vector for visualization
+      const embRes = await fetch(`${API_URL}/api/v1/embeddings/patch/${patch.id}`);
+      if (embRes.ok) {
+        const embData = await embRes.json();
+        setEmbeddingPreview(embData.vector);
+      }
+
       // Search similar
       const res = await fetch(`${API_URL}/api/v1/search/similar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ patch_id: patch.id, k: 12, exclude_same_slide: false }),
       });
-      const results = await res.json();
-      setSimilarPatches(Array.isArray(results) ? results : []);
+      if (res.ok) {
+        const results = await res.json();
+        setSimilarPatches(Array.isArray(results) ? results : []);
+      }
     } catch {
       setSimilarPatches([]);
     }
