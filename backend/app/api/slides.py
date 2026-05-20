@@ -2,7 +2,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,7 @@ from app.dependencies import get_db
 from app.models.patch import Patch
 from app.models.slide import Slide
 from app.schemas.slide import SlideOut, SlideListOut, PatchOut
+from app.services.dzi_service import dzi_service
 
 router = APIRouter()
 
@@ -137,3 +138,62 @@ async def delete_slide(slide_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     await db.delete(slide)
     await db.commit()
     return {"status": "deleted"}
+
+
+# ------------------------------------------------------------------
+# DZI (Deep Zoom Image) endpoints for OpenSeadragon viewer
+# ------------------------------------------------------------------
+
+@router.get("/{slide_id}/dzi")
+async def get_dzi_descriptor(
+    slide_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return DZI XML descriptor for the slide."""
+    slide = await db.get(Slide, slide_id)
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
+    if not slide.original_path or not Path(slide.original_path).exists():
+        raise HTTPException(status_code=404, detail="Slide file not found on disk")
+
+    try:
+        xml = dzi_service.get_dzi_xml(slide.original_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate DZI: {exc}")
+
+    return Response(content=xml, media_type="application/xml")
+
+
+@router.get("/{slide_id}/dzi/{level}/{tile_coord}.jpeg")
+async def get_dzi_tile(
+    slide_id: uuid.UUID,
+    level: int,
+    tile_coord: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a single DZI tile image as JPEG."""
+    slide = await db.get(Slide, slide_id)
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
+    if not slide.original_path or not Path(slide.original_path).exists():
+        raise HTTPException(status_code=404, detail="Slide file not found on disk")
+
+    # Parse "col_row" from tile_coord
+    try:
+        parts = tile_coord.split("_")
+        col = int(parts[0])
+        row = int(parts[1])
+    except (ValueError, IndexError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid tile coordinate format: '{tile_coord}'. Expected 'col_row'.",
+        )
+
+    try:
+        tile_bytes = dzi_service.get_tile(slide.original_path, level, col, row)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate tile: {exc}")
+
+    return Response(content=tile_bytes, media_type="image/jpeg")

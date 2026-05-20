@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { API_URL } from "@/lib/api";
 import type { Slide, Patch } from "@/lib/types";
+import WSIViewer from "@/components/viewer/WSIViewer";
 
 export default function SlideDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -123,6 +124,9 @@ export default function SlideDetailPage() {
           )}
         </div>
       )}
+
+      {/* WSI Viewer */}
+      <WSIViewer slideId={id} />
 
       {/* Thumbnail */}
       {slide.thumbnail_path && (
