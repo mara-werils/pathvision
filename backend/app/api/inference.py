@@ -55,14 +55,37 @@ async def get_predictions(
     return result.scalars().all()
 
 
+def _resolve_path(db_path: str | None) -> Path | None:
+    """Resolve a file path that may differ between Docker and host."""
+    if not db_path:
+        return None
+    p = Path(db_path)
+    if p.exists():
+        return p
+    # Try mapping host path to Docker /data path
+    if "/pathvision/data/" in db_path:
+        alt = Path("/data/" + db_path.split("/pathvision/data/", 1)[1])
+        if alt.exists():
+            return alt
+    # Try mapping /data to host path
+    if db_path.startswith("/data/"):
+        import os
+        data_dir = os.environ.get("DATA_DIR", "/data")
+        alt = Path(data_dir) / db_path[len("/data/"):]
+        if alt.exists():
+            return alt
+    return None
+
+
 @router.get("/{job_id}/heatmap")
 async def get_heatmap(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     job = await db.get(InferenceJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Inference job not found")
-    if not job.heatmap_path or not Path(job.heatmap_path).exists():
+    resolved = _resolve_path(job.heatmap_path)
+    if not resolved:
         raise HTTPException(status_code=404, detail="Heatmap not generated yet")
-    return FileResponse(job.heatmap_path, media_type="image/png")
+    return FileResponse(str(resolved), media_type="image/png")
 
 
 @router.get("/{job_id}/heatmap/confidence")
@@ -70,10 +93,11 @@ async def get_confidence_map(job_id: uuid.UUID, db: AsyncSession = Depends(get_d
     job = await db.get(InferenceJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Inference job not found")
-    conf_path = job.heatmap_path.replace(".png", "_conf.png") if job.heatmap_path else None
-    if not conf_path or not Path(conf_path).exists():
+    conf_db_path = job.heatmap_path.replace(".png", "_conf.png") if job.heatmap_path else None
+    resolved = _resolve_path(conf_db_path)
+    if not resolved:
         raise HTTPException(status_code=404, detail="Confidence map not available")
-    return FileResponse(conf_path, media_type="image/png")
+    return FileResponse(str(resolved), media_type="image/png")
 
 
 @router.get("", response_model=list[InferenceJobOut])

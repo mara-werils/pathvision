@@ -48,7 +48,6 @@ class ClassifierService:
                         max_iter=1000,
                         class_weight="balanced",
                         C=1.0,
-                        multi_class="multinomial" if n_classes > 2 else "auto",
                     ),
                 ),
             ]
