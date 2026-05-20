@@ -1,0 +1,18 @@
+FROM tensorflow/tensorflow:2.15.0-gpu
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openslide-tools \
+    libopenslide0 \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Pre-download model at build time
+RUN python -c "from huggingface_hub import from_pretrained_keras; from_pretrained_keras('google/path-foundation')" || true

@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.env
+data/
+*.egg-info/
+dist/
+.venv/
+node_modules/
+.next/
+frontend/.next/
+frontend/node_modules/
+.DS_Store
+*.swp
+*.swo

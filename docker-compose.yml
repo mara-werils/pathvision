@@ -1,0 +1,113 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pathvision
+      POSTGRES_USER: pathvision
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pathvision"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pathvision:${DB_PASSWORD}@db:5432/pathvision
+      DATABASE_URL_SYNC: postgresql://pathvision:${DB_PASSWORD}@db:5432/pathvision
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      SECRET_KEY: ${SECRET_KEY}
+      HF_TOKEN: ${HF_TOKEN}
+    volumes:
+      - ./backend/app:/app/app
+      - ./data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery-cpu:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pathvision:${DB_PASSWORD}@db:5432/pathvision
+      DATABASE_URL_SYNC: postgresql://pathvision:${DB_PASSWORD}@db:5432/pathvision
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      HF_TOKEN: ${HF_TOKEN}
+    volumes:
+      - ./backend/app:/app/app
+      - ./data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app worker -Q cpu -c 4 --loglevel=info
+
+  celery-gpu:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.gpu
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pathvision:${DB_PASSWORD}@db:5432/pathvision
+      DATABASE_URL_SYNC: postgresql://pathvision:${DB_PASSWORD}@db:5432/pathvision
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      HF_TOKEN: ${HF_TOKEN}
+      TF_FORCE_GPU_ALLOW_GROWTH: "true"
+    volumes:
+      - ./data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: celery -A app.workers.celery_app worker -Q gpu -c 1 --loglevel=info
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    volumes:
+      - ./frontend/src:/app/src
+    command: npm run dev
+
+volumes:
+  pgdata:
