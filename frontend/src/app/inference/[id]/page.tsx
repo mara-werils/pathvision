@@ -61,6 +61,40 @@ export default function InferenceResultPage() {
         </div>
       )}
 
+      {/* Heatmaps */}
+      {job.status === "complete" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold mb-3">Classification Heatmap</h2>
+            <img
+              src={`${API_URL}/api/v1/inference/${id}/heatmap`}
+              alt="Classification heatmap"
+              className="w-full rounded border"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+            <p className="text-xs text-gray-400 mt-2">
+              Green = class 0, Red = class 1. Opacity reflects confidence.
+            </p>
+          </div>
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold mb-3">Confidence Map (Class 1)</h2>
+            <img
+              src={`${API_URL}/api/v1/inference/${id}/heatmap/confidence`}
+              alt="Confidence map"
+              className="w-full rounded border"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+            <p className="text-xs text-gray-400 mt-2">
+              Blue = low probability, Red = high probability of class 1.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Summary */}
       {job.summary && (
         <div className="bg-white rounded-lg shadow p-6 mb-6">

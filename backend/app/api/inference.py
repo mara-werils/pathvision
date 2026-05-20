@@ -1,6 +1,8 @@
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,6 +53,27 @@ async def get_predictions(
         .limit(limit)
     )
     return result.scalars().all()
+
+
+@router.get("/{job_id}/heatmap")
+async def get_heatmap(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+    if not job.heatmap_path or not Path(job.heatmap_path).exists():
+        raise HTTPException(status_code=404, detail="Heatmap not generated yet")
+    return FileResponse(job.heatmap_path, media_type="image/png")
+
+
+@router.get("/{job_id}/heatmap/confidence")
+async def get_confidence_map(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+    conf_path = job.heatmap_path.replace(".png", "_conf.png") if job.heatmap_path else None
+    if not conf_path or not Path(conf_path).exists():
+        raise HTTPException(status_code=404, detail="Confidence map not available")
+    return FileResponse(conf_path, media_type="image/png")
 
 
 @router.get("", response_model=list[InferenceJobOut])

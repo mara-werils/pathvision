@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 from sqlalchemy import create_engine, select
@@ -14,6 +15,7 @@ from app.config import settings
 from app.models.embedding import Embedding
 from app.models.inference_job import InferenceJob
 from app.models.patch_prediction import PatchPrediction
+from app.models.slide import Slide
 from app.services.classifier_service import ClassifierService
 from app.workers.celery_app import celery
 
@@ -87,9 +89,69 @@ def run_inference(self, job_id: str) -> dict:
             "class_names": class_names,
         }
 
+        # Generate heatmap
+        heatmap_path = None
+        try:
+            from app.models.patch import Patch
+            from app.services.heatmap_service import HeatmapService
+
+            slide = db.get(Slide, job.slide_id)
+            if slide and slide.width and slide.height:
+                # Build prediction data with coordinates
+                patch_map = {}
+                patches_db = db.execute(
+                    select(Patch.id, Patch.x, Patch.y).where(Patch.slide_id == job.slide_id)
+                ).all()
+                for pid_row, x_row, y_row in patches_db:
+                    patch_map[pid_row] = (x_row, y_row)
+
+                hm_predictions = []
+                for pid, pred_cls, probs in zip(
+                    patch_ids, result["predictions"], result["probabilities"]
+                ):
+                    coords = patch_map.get(pid)
+                    if coords:
+                        hm_predictions.append({
+                            "x": coords[0],
+                            "y": coords[1],
+                            "predicted_class": pred_cls,
+                            "confidence": max(probs),
+                            "probabilities": probs,
+                        })
+
+                hm_dir = Path(settings.DATA_DIR) / "heatmaps"
+                hm_dir.mkdir(parents=True, exist_ok=True)
+                hm_path = str(hm_dir / f"{job_id}.png")
+
+                HeatmapService().generate(
+                    predictions=hm_predictions,
+                    slide_width=slide.width,
+                    slide_height=slide.height,
+                    patch_size=224,
+                    level_downsample=1.0,
+                    save_path=hm_path,
+                )
+                heatmap_path = hm_path
+
+                # Also generate confidence map for class 1 (e.g. tumor)
+                if len(class_names) >= 2:
+                    conf_path = str(hm_dir / f"{job_id}_conf.png")
+                    HeatmapService().generate_confidence_map(
+                        predictions=hm_predictions,
+                        slide_width=slide.width,
+                        slide_height=slide.height,
+                        patch_size=224,
+                        level_downsample=1.0,
+                        target_class=1,
+                        save_path=conf_path,
+                    )
+        except Exception as e:
+            logger.warning("Heatmap generation failed: %s", e)
+
         job.status = "complete"
         job.progress_current = len(rows)
         job.summary = summary
+        job.heatmap_path = heatmap_path
         job.completed_at = datetime.now(timezone.utc)
         db.commit()
 
