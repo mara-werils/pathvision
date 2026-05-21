@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import Optional
 
@@ -53,25 +54,36 @@ async def search_similar_upload(
 ):
     """Find similar patches by uploading a query image.
 
-    Requires the embedding model to be available (GPU worker).
+    Requires the embedding model to be available.
     """
     from PIL import Image
     import io
 
     raw = await file.read()
-    img = Image.open(io.BytesIO(raw)).convert("RGB").resize((224, 224))
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB").resize((224, 224))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image file")
+
     img_arr = np.array(img)
 
-    # Generate embedding for query image
     from app.services.embedding_service import EmbeddingService
-
-    svc_emb = EmbeddingService.get_instance()
-    query = svc_emb.embed_patch(img_arr)
-
     from app.services.search_service import SearchService
 
-    svc = SearchService.get_instance()
-    results = svc.search(query, k=k)
+    def _embed_and_search() -> list[dict]:
+        svc_emb = EmbeddingService.get_instance()
+        query = svc_emb.embed_patch(img_arr)
+        svc = SearchService.get_instance()
+        return svc.search(query, k=k)
+
+    try:
+        results = await asyncio.to_thread(_embed_and_search)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Embedding model unavailable: {exc}",
+        )
+
     return results
 
 

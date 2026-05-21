@@ -255,7 +255,7 @@ async def export_predictions_pdf(job_id: uuid.UUID, db: AsyncSession = Depends(g
 
     # Footer
     elements.append(Paragraph(
-        f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC &bull; Job ID: {job_id}",
+        f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC &#8226; Job ID: {job_id}",
         styles["Normal"],
     ))
 
