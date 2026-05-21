@@ -21,8 +21,9 @@ class EmbeddingService:
     @classmethod
     def get_instance(cls) -> EmbeddingService:
         if cls._instance is None:
-            cls._instance = cls()
-            cls._instance._load_model()
+            inst = cls()
+            inst._load_model()
+            cls._instance = inst
         return cls._instance
 
     def _load_model(self) -> None:

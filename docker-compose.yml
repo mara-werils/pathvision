@@ -41,6 +41,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./data:/data
+      - ~/.cache/huggingface:/root/.cache/huggingface
     ports:
       - "8000:8000"
     depends_on:
