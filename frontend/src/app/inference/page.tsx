@@ -21,7 +21,14 @@ export default function InferencePage() {
 
       {jobs.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
-          No inference jobs yet. Run a classifier on a slide to see results.
+          <p>No inference jobs yet.</p>
+          <p className="mt-2">
+            Go to a{" "}
+            <Link href="/slides" className="text-indigo-600 hover:underline font-medium">
+              slide
+            </Link>{" "}
+            and run inference with a trained classifier.
+          </p>
         </div>
       ) : (
         <div className="space-y-3">

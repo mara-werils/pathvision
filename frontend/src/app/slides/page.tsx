@@ -38,7 +38,12 @@ export default function SlidesPage() {
 
       {slides.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
-          No slides uploaded yet.
+          <p>No slides uploaded yet.</p>
+          <p className="mt-2">
+            <Link href="/slides/upload" className="text-indigo-600 hover:underline font-medium">
+              Upload your first slide
+            </Link>
+          </p>
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">

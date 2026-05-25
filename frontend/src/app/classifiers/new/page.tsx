@@ -13,9 +13,13 @@ export default function NewClassifierPage() {
   const [uploading, setUploading] = useState(false);
   const [labelsUploaded, setLabelsUploaded] = useState(false);
   const [training, setTraining] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const uploadLabels = async () => {
     if (!labelFile) return;
+    setError(null);
+    setSuccess(null);
     setUploading(true);
     const formData = new FormData();
     formData.append("file", labelFile);
@@ -25,23 +29,25 @@ export default function NewClassifierPage() {
         body: formData,
       });
       const data = await res.json();
-      alert(`Labels uploaded: ${data.labels_added} added`);
+      setSuccess(`Labels uploaded: ${data.labels_added} added`);
       setLabelsUploaded(true);
     } catch (err) {
-      alert("Failed to upload labels");
+      setError("Failed to upload labels");
     } finally {
       setUploading(false);
     }
   };
 
   const startTraining = async () => {
+    setError(null);
+    setSuccess(null);
     const classNames = classes.split(",").map((c) => c.trim()).filter(Boolean);
     if (classNames.length < 2) {
-      alert("Need at least 2 class names");
+      setError("Need at least 2 class names");
       return;
     }
     if (!name.trim()) {
-      alert("Enter a classifier name");
+      setError("Enter a classifier name");
       return;
     }
 
@@ -59,7 +65,7 @@ export default function NewClassifierPage() {
       const clf = await res.json();
       router.push(`/classifiers/${clf.id}`);
     } catch (err) {
-      alert("Training failed to start");
+      setError("Training failed to start");
       setTraining(false);
     }
   };
@@ -67,6 +73,9 @@ export default function NewClassifierPage() {
   return (
     <div className="max-w-2xl">
       <h1 className="text-2xl font-bold mb-6">Train New Classifier</h1>
+
+      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {success && <p className="text-green-600 text-sm mb-4">{success}</p>}
 
       {/* Step 1: Upload labels */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">

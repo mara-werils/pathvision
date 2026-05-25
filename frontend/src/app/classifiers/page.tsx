@@ -29,7 +29,12 @@ export default function ClassifiersPage() {
 
       {classifiers.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
-          No classifiers trained yet. Train one from labeled patches.
+          <p>No classifiers trained yet.</p>
+          <p className="mt-2">
+            <Link href="/classifiers/new" className="text-emerald-600 hover:underline font-medium">
+              Train your first classifier
+            </Link>
+          </p>
         </div>
       ) : (
         <div className="space-y-4">

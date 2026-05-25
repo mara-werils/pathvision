@@ -8,9 +8,11 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export default function UploadPage() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   const handleUpload = async (file: File) => {
+    setError(null);
     setUploading(true);
     const formData = new FormData();
     formData.append("file", file);
@@ -24,7 +26,7 @@ export default function UploadPage() {
       const slide = await res.json();
       router.push(`/slides/${slide.id}`);
     } catch (err) {
-      alert("Upload failed. Check the console for details.");
+      setError("Upload failed. Please try again.");
       console.error(err);
     } finally {
       setUploading(false);
@@ -34,6 +36,8 @@ export default function UploadPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-6">Upload Slide</h1>
+
+      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
 
       <div
         className={`border-2 border-dashed rounded-lg p-16 text-center transition ${
