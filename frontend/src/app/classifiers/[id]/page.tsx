@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { API_URL } from "@/lib/api";
 import type { Classifier } from "@/lib/types";
 import ROCChart from "@/components/classifiers/ROCChart";
@@ -23,10 +24,18 @@ export default function ClassifierDetailPage() {
     poll();
   }, [id]);
 
-  if (!clf) return <p className="p-6">Loading...</p>;
+  if (!clf) return (
+    <div className="flex items-center justify-center h-64">
+      <div className="animate-spin h-8 w-8 border-4 border-indigo-600 border-t-transparent rounded-full" />
+    </div>
+  );
 
   return (
     <div>
+      <Link href="/classifiers" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-indigo-600 mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+        Back to Classifiers
+      </Link>
       <div className="flex justify-between items-start mb-6">
         <div>
           <h1 className="text-2xl font-bold">{clf.name}</h1>

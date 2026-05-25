@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { API_URL } from "@/lib/api";
 import type { InferenceJob, PatchPrediction } from "@/lib/types";
 import HeatmapOverlay from "@/components/viewer/HeatmapOverlay";
@@ -27,10 +28,37 @@ export default function InferenceResultPage() {
     poll();
   }, [id]);
 
-  if (!job) return <p className="p-6">Loading...</p>;
+  if (!job) return (
+    <div className="flex items-center justify-center h-64">
+      <div className="animate-spin h-8 w-8 border-4 border-indigo-600 border-t-transparent rounded-full" />
+    </div>
+  );
+
+  const LABEL_COLORS = [
+    { bg: "bg-green-100", text: "text-green-700" },
+    { bg: "bg-red-100", text: "text-red-700" },
+    { bg: "bg-blue-100", text: "text-blue-700" },
+    { bg: "bg-orange-100", text: "text-orange-700" },
+    { bg: "bg-purple-100", text: "text-purple-700" },
+    { bg: "bg-pink-100", text: "text-pink-700" },
+    { bg: "bg-teal-100", text: "text-teal-700" },
+    { bg: "bg-yellow-100", text: "text-yellow-700" },
+  ];
+
+  // Build a stable label-to-color mapping from all predictions
+  const labelColorMap = new Map<string, { bg: string; text: string }>();
+  predictions.forEach((p) => {
+    if (!labelColorMap.has(p.predicted_label)) {
+      labelColorMap.set(p.predicted_label, LABEL_COLORS[labelColorMap.size % LABEL_COLORS.length]);
+    }
+  });
 
   return (
     <div>
+      <Link href="/inference" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-indigo-600 mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+        Back to Inference
+      </Link>
       <div className="flex justify-between items-start mb-6">
         <h1 className="text-2xl font-bold">Inference Results</h1>
         <div className="flex items-center gap-3">
@@ -139,9 +167,9 @@ export default function InferenceResultPage() {
                     <td className="px-3 py-2">
                       <span
                         className={`px-2 py-0.5 text-xs rounded-full ${
-                          p.predicted_label === "tumor"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-green-100 text-green-700"
+                          (labelColorMap.get(p.predicted_label) ?? LABEL_COLORS[0]).bg
+                        } ${
+                          (labelColorMap.get(p.predicted_label) ?? LABEL_COLORS[0]).text
                         }`}
                       >
                         {p.predicted_label}
