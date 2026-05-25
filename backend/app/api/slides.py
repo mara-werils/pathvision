@@ -166,21 +166,14 @@ async def get_dzi_descriptor(
     return Response(content=xml, media_type="application/xml")
 
 
-@router.get("/{slide_id}/dzi/{level}/{tile_coord}.jpeg")
-async def get_dzi_tile(
-    slide_id: uuid.UUID,
-    level: int,
-    tile_coord: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Return a single DZI tile image as JPEG."""
+async def _serve_dzi_tile(slide_id: uuid.UUID, level: int, tile_coord: str, db: AsyncSession):
+    """Shared handler for DZI tile requests."""
     slide = await db.get(Slide, slide_id)
     if not slide:
         raise HTTPException(status_code=404, detail="Slide not found")
     if not slide.original_path or not Path(slide.original_path).exists():
         raise HTTPException(status_code=404, detail="Slide file not found on disk")
 
-    # Parse "col_row" from tile_coord
     try:
         parts = tile_coord.split("_")
         col = int(parts[0])
@@ -199,6 +192,28 @@ async def get_dzi_tile(
         raise HTTPException(status_code=500, detail=f"Failed to generate tile: {exc}")
 
     return Response(content=tile_bytes, media_type="image/jpeg")
+
+
+@router.get("/{slide_id}/dzi/{level}/{tile_coord}.jpeg")
+async def get_dzi_tile(
+    slide_id: uuid.UUID,
+    level: int,
+    tile_coord: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a single DZI tile image as JPEG."""
+    return await _serve_dzi_tile(slide_id, level, tile_coord, db)
+
+
+@router.get("/{slide_id}/dzi_files/{level}/{tile_coord}.jpeg")
+async def get_dzi_tile_osd(
+    slide_id: uuid.UUID,
+    level: int,
+    tile_coord: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a single DZI tile — OpenSeadragon default URL pattern."""
+    return await _serve_dzi_tile(slide_id, level, tile_coord, db)
 
 
 @router.get("/{slide_id}/export/patches/csv")
