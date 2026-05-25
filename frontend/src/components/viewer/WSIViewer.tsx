@@ -48,8 +48,10 @@ export default function WSIViewer({ slideId }: WSIViewerProps) {
           visibilityRatio: 1,
           zoomPerScroll: 1.2,
           showNavigator: true,
-          navigatorPosition: "BOTTOM_RIGHT" as OpenSeadragon.ControlAnchor,
+          navigatorPosition: "TOP_RIGHT" as OpenSeadragon.ControlAnchor,
           navigatorSizeRatio: 0.15,
+          navigatorAutoFade: true,
+          navigatorMaintainSizeRatio: true,
           showZoomControl: true,
           showHomeControl: true,
           showFullPageControl: true,
@@ -92,7 +94,7 @@ export default function WSIViewer({ slideId }: WSIViewerProps) {
           </p>
         </div>
       ) : (
-        <div className="relative">
+        <div className="relative overflow-hidden rounded">
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-50 z-10 rounded">
               <div className="text-center">
@@ -104,7 +106,7 @@ export default function WSIViewer({ slideId }: WSIViewerProps) {
           <div
             ref={containerRef}
             className="w-full border rounded"
-            style={{ height: "500px" }}
+            style={{ height: "500px", position: "relative" }}
           />
         </div>
       )}
