@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { API_URL } from "@/lib/api";
 import type { InferenceJob, PatchPrediction } from "@/lib/types";
-import HeatmapOverlay from "@/components/viewer/HeatmapOverlay";
+import WSIHeatmapViewer from "@/components/viewer/WSIHeatmapViewer";
 
 export default function InferenceResultPage() {
   const { id } = useParams<{ id: string }>();
@@ -115,7 +115,7 @@ export default function InferenceResultPage() {
       {/* Heatmap Overlay */}
       {job.status === "complete" && (
         <div className="mb-6">
-          <HeatmapOverlay jobId={id} slideId={job.slide_id} />
+          <WSIHeatmapViewer jobId={id} slideId={job.slide_id} />
         </div>
       )}
 
