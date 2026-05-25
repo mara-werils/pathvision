@@ -6,6 +6,7 @@ import Link from "next/link";
 import { API_URL } from "@/lib/api";
 import type { Slide, Patch, Classifier } from "@/lib/types";
 import WSIViewer from "@/components/viewer/WSIViewer";
+import PatchLabelingPanel from "@/components/viewer/PatchLabelingPanel";
 
 export default function SlideDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -253,6 +254,11 @@ export default function SlideDetailPage() {
             <p className="text-red-600 text-sm mt-3">{inferenceError}</p>
           )}
         </div>
+      )}
+
+      {/* Patch Labeling */}
+      {slide.status === "tiled" && hasEmbeddings && (
+        <PatchLabelingPanel slideId={id} classifiers={classifiers} />
       )}
 
       {/* WSI Viewer */}

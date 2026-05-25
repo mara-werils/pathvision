@@ -6,9 +6,10 @@ import { API_URL } from "@/lib/api";
 
 interface WSIViewerProps {
   slideId: string;
+  onViewerReady?: (viewer: OpenSeadragon.Viewer) => void;
 }
 
-export default function WSIViewer({ slideId }: WSIViewerProps) {
+export default function WSIViewer({ slideId, onViewerReady }: WSIViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +59,10 @@ export default function WSIViewer({ slideId }: WSIViewerProps) {
           showRotationControl: false,
         });
 
-        viewer.addHandler("open", () => setLoading(false));
+        viewer.addHandler("open", () => {
+          setLoading(false);
+          onViewerReady?.(viewer);
+        });
         viewer.addHandler("open-failed", (event: any) => {
           setLoading(false);
           setError(`Failed to load slide tiles: ${event.message || "unknown error"}`);
