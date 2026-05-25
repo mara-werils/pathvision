@@ -249,18 +249,6 @@ export default function SlideDetailPage() {
       {/* WSI Viewer */}
       <WSIViewer slideId={id} />
 
-      {/* Thumbnail */}
-      {slide.thumbnail_path && (
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-3">Thumbnail</h2>
-          <img
-            src={`${API_URL}/api/v1/slides/${id}/thumbnail`}
-            alt="Slide thumbnail"
-            className="max-w-md rounded border"
-          />
-        </div>
-      )}
-
       {/* Patch grid */}
       {patches.length > 0 && (
         <div className="bg-white rounded-lg shadow p-6">
