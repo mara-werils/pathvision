@@ -5,14 +5,15 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.dependencies import get_db
 from app.models.patch import Patch
+from app.models.patch_label import PatchLabel
 from app.models.slide import Slide
-from app.schemas.slide import SlideOut, SlideListOut, PatchOut
+from app.schemas.slide import PatchLabelRequest, SlideOut, SlideListOut, PatchOut
 from app.services.dzi_service import dzi_service
 
 router = APIRouter()
@@ -249,3 +250,56 @@ async def export_patches_csv(slide_id: uuid.UUID, db: AsyncSession = Depends(get
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=patches_{slide_id}.csv"},
     )
+
+
+@router.put("/{slide_id}/patches/{patch_id}/label")
+async def label_patch(
+    slide_id: uuid.UUID,
+    patch_id: uuid.UUID,
+    req: PatchLabelRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign or update a label for a patch."""
+    patch = await db.get(Patch, patch_id)
+    if not patch or patch.slide_id != slide_id:
+        raise HTTPException(status_code=404, detail="Patch not found")
+
+    # Check for existing label
+    result = await db.execute(
+        select(PatchLabel).where(PatchLabel.patch_id == patch_id)
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.label = req.label
+        existing.label_source = "interactive"
+    else:
+        db.add(PatchLabel(patch_id=patch_id, label=req.label, label_source="interactive"))
+    await db.commit()
+    return {"status": "ok", "patch_id": str(patch_id), "label": req.label}
+
+
+@router.get("/{slide_id}/labels/summary")
+async def get_label_summary(slide_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Get label counts for a slide."""
+    result = await db.execute(
+        select(PatchLabel.label, func.count().label("count"))
+        .join(Patch, PatchLabel.patch_id == Patch.id)
+        .where(Patch.slide_id == slide_id)
+        .group_by(PatchLabel.label)
+    )
+    rows = result.all()
+    counts = {row.label: row.count for row in rows}
+    total = sum(counts.values())
+    return {"slide_id": str(slide_id), "total_labeled": total, "counts": counts}
+
+
+@router.get("/{slide_id}/patches/coordinates")
+async def get_patch_coordinates(slide_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Get all patch IDs with x,y coordinates for overlay grid."""
+    result = await db.execute(
+        select(Patch.id, Patch.x, Patch.y)
+        .where(Patch.slide_id == slide_id)
+        .order_by(Patch.x, Patch.y)
+    )
+    rows = result.all()
+    return [{"id": str(r.id), "x": r.x, "y": r.y} for r in rows]

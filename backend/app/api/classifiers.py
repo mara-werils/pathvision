@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db
 from app.models.classifier import Classifier
+from app.models.patch import Patch
 from app.models.patch_label import PatchLabel
-from app.schemas.classifier import ClassifierCreate, ClassifierOut
+from app.schemas.classifier import ActiveLearningRequest, ClassifierCreate, ClassifierOut
 
 router = APIRouter()
 
@@ -133,3 +134,78 @@ async def export_model(classifier_id: uuid.UUID, db: AsyncSession = Depends(get_
         media_type="application/octet-stream",
         filename=f"{clf.name}.joblib",
     )
+
+
+@router.post("/{classifier_id}/active-learning")
+async def suggest_uncertain_patches(
+    classifier_id: uuid.UUID,
+    req: ActiveLearningRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the most uncertain patches for active learning."""
+    clf = await db.get(Classifier, classifier_id)
+    if not clf or clf.status != "ready":
+        raise HTTPException(status_code=404, detail="Classifier not ready")
+    if not clf.model_path:
+        raise HTTPException(status_code=404, detail="Model file not found")
+
+    import joblib
+    import numpy as np
+    model = joblib.load(clf.model_path)
+
+    # Get all embeddings for the slide
+    from app.models.embedding import Embedding
+    result = await db.execute(
+        select(Embedding.patch_id, Embedding.vector)
+        .where(Embedding.slide_id == req.slide_id)
+    )
+    embed_rows = result.all()
+    if not embed_rows:
+        return []
+
+    # Get already labeled patch IDs to exclude
+    labeled_result = await db.execute(
+        select(PatchLabel.patch_id)
+        .join(Patch, PatchLabel.patch_id == Patch.id)
+        .where(Patch.slide_id == req.slide_id)
+    )
+    labeled_ids = {row.patch_id for row in labeled_result.all()}
+
+    # Filter to unlabeled only
+    unlabeled = [(r.patch_id, r.vector) for r in embed_rows if r.patch_id not in labeled_ids]
+    if not unlabeled:
+        return []
+
+    patch_ids = [u[0] for u in unlabeled]
+    vectors = np.array([u[1] for u in unlabeled])
+
+    # Predict probabilities
+    probs = model.predict_proba(vectors)
+    max_probs = probs.max(axis=1)
+
+    # Sort by uncertainty (lowest max_prob = most uncertain)
+    indices = np.argsort(max_probs)[:req.top_n]
+
+    # Get patch coordinates
+    selected_ids = [patch_ids[i] for i in indices]
+    coord_result = await db.execute(
+        select(Patch.id, Patch.x, Patch.y).where(Patch.id.in_(selected_ids))
+    )
+    coord_map = {r.id: (r.x, r.y) for r in coord_result.all()}
+
+    class_names = clf.class_names or [str(i) for i in range(probs.shape[1])]
+    result_list = []
+    for i in indices:
+        pid = patch_ids[i]
+        if pid in coord_map:
+            x, y = coord_map[pid]
+            pred_class = int(probs[i].argmax())
+            result_list.append({
+                "patch_id": str(pid),
+                "x": x,
+                "y": y,
+                "max_probability": float(max_probs[i]),
+                "predicted_label": class_names[pred_class],
+            })
+
+    return result_list

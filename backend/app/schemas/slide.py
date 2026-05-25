@@ -44,3 +44,13 @@ class PatchOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PatchLabelRequest(BaseModel):
+    label: str
+
+
+class LabelSummaryOut(BaseModel):
+    slide_id: uuid.UUID
+    total_labeled: int
+    counts: dict[str, int]

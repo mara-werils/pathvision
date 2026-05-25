@@ -64,3 +64,23 @@ export type PatchPrediction = {
   predicted_label: string;
   probabilities: number[];
 };
+
+export type PatchCoordinate = {
+  id: string;
+  x: number;
+  y: number;
+};
+
+export type LabelSummary = {
+  slide_id: string;
+  total_labeled: number;
+  counts: Record<string, number>;
+};
+
+export type UncertainPatch = {
+  patch_id: string;
+  x: number;
+  y: number;
+  max_probability: number;
+  predicted_label: string;
+};

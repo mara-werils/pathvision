@@ -28,3 +28,16 @@ class ClassifierOut(BaseModel):
 class LabelUpload(BaseModel):
     patch_id: uuid.UUID
     label: str
+
+
+class ActiveLearningRequest(BaseModel):
+    slide_id: uuid.UUID
+    top_n: int = 20
+
+
+class UncertainPatchOut(BaseModel):
+    patch_id: uuid.UUID
+    x: int
+    y: int
+    max_probability: float
+    predicted_label: str
