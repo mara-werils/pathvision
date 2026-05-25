@@ -1,8 +1,10 @@
+import csv
+import io
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -197,3 +199,38 @@ async def get_dzi_tile(
         raise HTTPException(status_code=500, detail=f"Failed to generate tile: {exc}")
 
     return Response(content=tile_bytes, media_type="image/jpeg")
+
+
+@router.get("/{slide_id}/export/patches/csv")
+async def export_patches_csv(slide_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Export all patch IDs and coordinates as a CSV file."""
+    slide = await db.get(Slide, slide_id)
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
+
+    result = await db.execute(
+        select(Patch)
+        .where(Patch.slide_id == slide_id)
+        .order_by(Patch.x, Patch.y)
+    )
+    patches = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["patch_id", "x", "y", "level", "magnification", "tissue_fraction"])
+    for p in patches:
+        writer.writerow([
+            str(p.id),
+            p.x,
+            p.y,
+            p.level,
+            p.magnification,
+            f"{p.tissue_fraction:.4f}" if p.tissue_fraction is not None else "",
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=patches_{slide_id}.csv"},
+    )
