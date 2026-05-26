@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { API_URL } from "@/lib/api";
 import type { InferenceJob, PatchPrediction } from "@/lib/types";
 import HeatmapOverlay from "@/components/viewer/HeatmapOverlay";
+import SlideDiagnosis from "@/components/viewer/SlideDiagnosis";
 
 export default function InferenceResultPage() {
   const { id } = useParams<{ id: string }>();
@@ -81,6 +82,13 @@ export default function InferenceResultPage() {
               }}
             />
           </div>
+        </div>
+      )}
+
+      {/* Slide-Level Diagnosis */}
+      {job.status === "complete" && (
+        <div className="mb-6">
+          <SlideDiagnosis jobId={id} />
         </div>
       )}
 

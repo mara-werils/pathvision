@@ -15,7 +15,8 @@ from app.models.inference_job import InferenceJob
 from app.models.patch import Patch
 from app.models.patch_prediction import PatchPrediction
 from app.models.slide import Slide
-from app.schemas.inference import InferenceJobOut, InferenceRequest, PatchPredictionOut
+from app.schemas.inference import InferenceJobOut, InferenceRequest, PatchPredictionOut, SlideDiagnosisOut
+from app.services.mil_service import MILService, PatchInfo
 
 router = APIRouter()
 
@@ -266,6 +267,68 @@ async def export_predictions_pdf(job_id: uuid.UUID, db: AsyncSession = Depends(g
         buf,
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=report_{job_id}.pdf"},
+    )
+
+
+@router.get("/{job_id}/slide-diagnosis", response_model=SlideDiagnosisOut)
+async def get_slide_diagnosis(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Compute slide-level diagnosis using MIL attention aggregation."""
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+    if job.status != "complete":
+        raise HTTPException(status_code=400, detail="Inference job is not complete yet")
+
+    classifier = await db.get(Classifier, job.classifier_id)
+    class_names = list(classifier.class_names) if classifier and classifier.class_names else None
+
+    # Fetch all patch predictions with coordinates
+    result = await db.execute(
+        select(
+            PatchPrediction.patch_id,
+            Patch.x,
+            Patch.y,
+            PatchPrediction.predicted_class,
+            PatchPrediction.predicted_label,
+            PatchPrediction.probabilities,
+        )
+        .join(Patch, PatchPrediction.patch_id == Patch.id)
+        .where(PatchPrediction.inference_job_id == job_id)
+    )
+    rows = result.all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No predictions found for this job")
+
+    patches = [
+        PatchInfo(
+            patch_id=row.patch_id,
+            x=row.x,
+            y=row.y,
+            predicted_class=row.predicted_class,
+            predicted_label=row.predicted_label,
+            probabilities=row.probabilities,
+        )
+        for row in rows
+    ]
+
+    mil = MILService()
+    diagnosis = mil.aggregate(
+        slide_id=job.slide_id,
+        patches=patches,
+        class_names=class_names,
+    )
+
+    return SlideDiagnosisOut(
+        slide_id=str(diagnosis.slide_id),
+        diagnosis=diagnosis.diagnosis,
+        confidence=diagnosis.confidence,
+        class_probabilities=diagnosis.class_probabilities,
+        total_patches=diagnosis.total_patches,
+        tumor_patches=diagnosis.tumor_patches,
+        tumor_percentage=diagnosis.tumor_percentage,
+        top_attention_patches=diagnosis.top_attention_patches,
+        spatial_summary=diagnosis.spatial_summary,
     )
 
 
