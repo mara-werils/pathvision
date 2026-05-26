@@ -269,6 +269,342 @@ async def export_predictions_pdf(job_id: uuid.UUID, db: AsyncSession = Depends(g
     )
 
 
+async def _build_report_data(
+    job_id: uuid.UUID, db: AsyncSession
+) -> dict:
+    """Gather all data needed for report generation."""
+    from app.services.report_service import (
+        _compute_confidence_stats,
+        _count_tumor_regions,
+        generate_report_json,
+    )
+
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+    if job.status != "complete":
+        raise HTTPException(status_code=400, detail="Inference job is not complete")
+
+    slide = await db.get(Slide, job.slide_id)
+    classifier = await db.get(Classifier, job.classifier_id)
+
+    # Class distribution from aggregation
+    result = await db.execute(
+        select(
+            PatchPrediction.predicted_label,
+            PatchPrediction.predicted_class,
+            func.count().label("count"),
+        )
+        .where(PatchPrediction.inference_job_id == job_id)
+        .group_by(PatchPrediction.predicted_label, PatchPrediction.predicted_class)
+        .order_by(PatchPrediction.predicted_class)
+    )
+    class_rows = result.all()
+    total_patches = sum(r.count for r in class_rows)
+    class_counts = [
+        {"label": r.predicted_label, "class_idx": r.predicted_class, "count": r.count}
+        for r in class_rows
+    ]
+
+    # Get all predictions for confidence stats and spatial analysis
+    result = await db.execute(
+        select(
+            PatchPrediction.predicted_label,
+            PatchPrediction.probabilities,
+            Patch.x,
+            Patch.y,
+        )
+        .join(Patch, PatchPrediction.patch_id == Patch.id)
+        .where(PatchPrediction.inference_job_id == job_id)
+    )
+    all_preds = result.all()
+
+    probabilities_list = [r.probabilities for r in all_preds]
+    confidence_stats = _compute_confidence_stats(probabilities_list)
+
+    pred_dicts = [
+        {"predicted_label": r.predicted_label, "x": r.x, "y": r.y}
+        for r in all_preds
+    ]
+    tumor_regions = _count_tumor_regions(pred_dicts)
+
+    # Determine embedding model version
+    embedding_model = "path-foundation-v1"
+
+    slide_dict = {
+        "filename": slide.filename if slide else "N/A",
+        "width": slide.width if slide else None,
+        "height": slide.height if slide else None,
+        "magnification": slide.magnification if slide else None,
+        "vendor": slide.vendor if slide else None,
+    }
+
+    classifier_dict = {
+        "name": classifier.name if classifier else "N/A",
+        "metrics": classifier.metrics if classifier else {},
+    }
+
+    report = generate_report_json(
+        job_id=job_id,
+        slide=slide_dict,
+        classifier=classifier_dict,
+        class_counts=class_counts,
+        total_patches=total_patches,
+        confidence_stats=confidence_stats,
+        tumor_regions=tumor_regions,
+        embedding_model=embedding_model,
+    )
+    return report
+
+
+@router.get("/{job_id}/report")
+async def get_inference_report(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Return a structured AI-assisted pathology report as JSON."""
+    return await _build_report_data(job_id, db)
+
+
+@router.get("/{job_id}/export/report")
+async def export_report_pdf(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Generate a professional AI-assisted pathology report as PDF."""
+    report = await _build_report_data(job_id, db)
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        topMargin=20 * mm,
+        bottomMargin=25 * mm,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+    )
+    styles = getSampleStyleSheet()
+
+    # Custom styles
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontSize=20,
+        spaceAfter=4,
+        textColor=colors.HexColor("#1e293b"),
+    )
+    subtitle_style = ParagraphStyle(
+        "ReportSubtitle",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=colors.HexColor("#64748b"),
+        spaceAfter=12,
+    )
+    section_style = ParagraphStyle(
+        "SectionHead",
+        parent=styles["Heading2"],
+        fontSize=13,
+        textColor=colors.HexColor("#1e293b"),
+        spaceBefore=14,
+        spaceAfter=6,
+        borderWidth=0,
+    )
+    body_style = ParagraphStyle(
+        "ReportBody",
+        parent=styles["Normal"],
+        fontSize=10,
+        leading=14,
+        textColor=colors.HexColor("#334155"),
+    )
+    disclaimer_style = ParagraphStyle(
+        "Disclaimer",
+        parent=styles["Normal"],
+        fontSize=8,
+        leading=11,
+        textColor=colors.HexColor("#94a3b8"),
+        fontName="Helvetica-Oblique",
+    )
+
+    elements: list = []
+
+    # ---- Header ----
+    elements.append(Paragraph("PathVision", ParagraphStyle(
+        "Logo", parent=styles["Normal"], fontSize=10,
+        textColor=colors.HexColor("#4f46e5"), fontName="Helvetica-Bold",
+    )))
+    elements.append(Paragraph(report["title"], title_style))
+    elements.append(Paragraph(
+        f"Report ID: {report['report_id']} &bull; "
+        f"Generated: {report['generated_at'][:19].replace('T', ' ')} UTC",
+        subtitle_style,
+    ))
+    elements.append(Spacer(1, 2 * mm))
+
+    # ---- Specimen Information ----
+    elements.append(Paragraph("Specimen Information", section_style))
+    sp = report["specimen"]
+    spec_data = [
+        ["Slide Filename", sp["filename"]],
+        ["Image Dimensions", f"{sp['dimensions']} px"],
+        ["Scanning Magnification", sp["magnification"]],
+        ["Scanner Vendor", sp["vendor"]],
+    ]
+    t = Table(spec_data, colWidths=[150, 320])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f8fafc")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#334155")),
+        ("PADDING", (0, 0), (-1, -1), 7),
+    ]))
+    elements.append(t)
+
+    # ---- AI Analysis Parameters ----
+    elements.append(Paragraph("AI Analysis Parameters", section_style))
+    an = report["analysis"]
+    auc_str = f"{an['classifier_auc']:.4f}" if an.get("classifier_auc") else "N/A"
+    analysis_data = [
+        ["Classifier", an["classifier"]],
+        ["Classifier AUC", auc_str],
+        ["Patches Analyzed", str(an["total_patches"])],
+        ["Embedding Model", an["embedding_model"]],
+    ]
+    t = Table(analysis_data, colWidths=[150, 320])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f8fafc")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#334155")),
+        ("PADDING", (0, 0), (-1, -1), 7),
+    ]))
+    elements.append(t)
+
+    # ---- Findings ----
+    elements.append(Paragraph("Findings", section_style))
+
+    fd = report["findings"]
+    elements.append(Paragraph(
+        f"<b>Primary Assessment:</b> {fd['primary_diagnosis']}", body_style
+    ))
+
+    if fd.get("tumor_percentage") is not None:
+        elements.append(Paragraph(
+            f"<b>Overall Classification:</b> {fd['tumor_percentage']:.1f}% of analyzed "
+            f"tissue classified as tumor.", body_style
+        ))
+        if fd.get("tumor_regions", 0) > 0:
+            elements.append(Paragraph(
+                f"<b>Spatial Distribution:</b> Tumor tissue distributed across "
+                f"{fd['tumor_regions']} distinct region(s).", body_style
+            ))
+
+    elements.append(Spacer(1, 3 * mm))
+
+    # Class distribution table
+    elements.append(Paragraph("<b>Class Distribution</b>", body_style))
+    dist_header = ["Class", "Patch Count", "Percentage"]
+    dist_rows = [dist_header]
+    for item in fd["class_distribution"]:
+        dist_rows.append([
+            item["class"].capitalize(),
+            str(item["count"]),
+            f"{item['percentage']:.1f}%",
+        ])
+    dist_rows.append(["Total", str(an["total_patches"]), "100.0%"])
+
+    t = Table(dist_rows, colWidths=[160, 120, 120])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#f1f5f9")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR", (0, 1), (-1, -1), colors.HexColor("#334155")),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("PADDING", (0, 0), (-1, -1), 7),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 3 * mm))
+
+    # Confidence statistics table
+    elements.append(Paragraph("<b>Prediction Confidence</b>", body_style))
+    conf = fd["confidence"]
+    conf_data = [
+        ["Statistic", "Value"],
+        ["Mean Confidence", f"{conf['mean']:.4f}"],
+        ["Median Confidence", f"{conf['median']:.4f}"],
+        ["Minimum", f"{conf['min']:.4f}"],
+        ["Maximum", f"{conf['max']:.4f}"],
+        ["Standard Deviation", f"{conf['std']:.4f}"],
+    ]
+    t = Table(conf_data, colWidths=[200, 200])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR", (0, 1), (-1, -1), colors.HexColor("#334155")),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("PADDING", (0, 0), (-1, -1), 7),
+    ]))
+    elements.append(t)
+
+    # ---- Quality Metrics ----
+    elements.append(Paragraph("Quality Metrics", section_style))
+    qa = report["quality"]
+    cm = qa["classifier_metrics"]
+    qa_auc = f"{cm['auc']:.4f}" if cm.get("auc") else "N/A"
+    qa_f1 = f"{cm['f1_weighted']:.4f}" if cm.get("f1_weighted") else "N/A"
+    qa_data = [
+        ["Embedding Model", qa["embedding_model"]],
+        ["Classifier AUC", qa_auc],
+        ["Weighted F1 Score", qa_f1],
+    ]
+    t = Table(qa_data, colWidths=[150, 320])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f8fafc")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#334155")),
+        ("PADDING", (0, 0), (-1, -1), 7),
+    ]))
+    elements.append(t)
+
+    # ---- Disclaimer ----
+    elements.append(Spacer(1, 8 * mm))
+    elements.append(Paragraph(report["disclaimer"], disclaimer_style))
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(Paragraph(
+        f"Report ID: {report['report_id']} &bull; "
+        f"Generated: {report['generated_at'][:19].replace('T', ' ')} UTC &bull; "
+        f"PathVision Digital Pathology Platform",
+        disclaimer_style,
+    ))
+
+    doc.build(elements)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=pathology_report_{job_id}.pdf"
+        },
+    )
+
+
 @router.get("", response_model=list[InferenceJobOut])
 async def list_inference_jobs(db: AsyncSession = Depends(get_db)):
     result = await db.execute(

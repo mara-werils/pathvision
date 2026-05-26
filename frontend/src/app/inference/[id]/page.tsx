@@ -5,11 +5,13 @@ import { useParams } from "next/navigation";
 import { API_URL } from "@/lib/api";
 import type { InferenceJob, PatchPrediction } from "@/lib/types";
 import HeatmapOverlay from "@/components/viewer/HeatmapOverlay";
+import ReportPanel from "@/components/inference/ReportPanel";
 
 export default function InferenceResultPage() {
   const { id } = useParams<{ id: string }>();
   const [job, setJob] = useState<InferenceJob | null>(null);
   const [predictions, setPredictions] = useState<PatchPrediction[]>([]);
+  const [activeTab, setActiveTab] = useState<"results" | "report">("results");
 
   useEffect(() => {
     const poll = async () => {
@@ -84,76 +86,112 @@ export default function InferenceResultPage() {
         </div>
       )}
 
-      {/* Heatmap Overlay */}
+      {/* Tab switcher */}
       {job.status === "complete" && (
-        <div className="mb-6">
-          <HeatmapOverlay jobId={id} slideId={job.slide_id} />
+        <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
+          <button
+            onClick={() => setActiveTab("results")}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              activeTab === "results"
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Results
+          </button>
+          <button
+            onClick={() => setActiveTab("report")}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              activeTab === "report"
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            AI Report
+          </button>
         </div>
       )}
 
-      {/* Summary */}
-      {job.summary && (
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-3">Summary</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500">Total Patches</p>
-              <p className="text-2xl font-bold">{job.summary.total_patches}</p>
+      {/* Results tab */}
+      {activeTab === "results" && (
+        <>
+          {/* Heatmap Overlay */}
+          {job.status === "complete" && (
+            <div className="mb-6">
+              <HeatmapOverlay jobId={id} slideId={job.slide_id} />
             </div>
-            {job.summary.class_distribution &&
-              Object.entries(job.summary.class_distribution).map(([name, count]) => (
-                <div key={name} className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs text-gray-500">{name}</p>
-                  <p className="text-2xl font-bold">{count}</p>
-                  <p className="text-xs text-gray-400">
-                    {job.summary!.total_patches
-                      ? `${((count / job.summary!.total_patches!) * 100).toFixed(1)}%`
-                      : ""}
-                  </p>
+          )}
+
+          {/* Summary */}
+          {job.summary && (
+            <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <h2 className="text-lg font-semibold mb-3">Summary</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Total Patches</p>
+                  <p className="text-2xl font-bold">{job.summary.total_patches}</p>
                 </div>
-              ))}
-          </div>
-        </div>
+                {job.summary.class_distribution &&
+                  Object.entries(job.summary.class_distribution).map(([name, count]) => (
+                    <div key={name} className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500">{name}</p>
+                      <p className="text-2xl font-bold">{count}</p>
+                      <p className="text-xs text-gray-400">
+                        {job.summary!.total_patches
+                          ? `${((count / job.summary!.total_patches!) * 100).toFixed(1)}%`
+                          : ""}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Predictions table */}
+          {predictions.length > 0 && (
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-lg font-semibold mb-3">
+                Patch Predictions (first {predictions.length})
+              </h2>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left px-3 py-2">Patch ID</th>
+                    <th className="text-left px-3 py-2">Prediction</th>
+                    <th className="text-left px-3 py-2">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {predictions.map((p) => {
+                    const conf = Math.max(...p.probabilities);
+                    return (
+                      <tr key={p.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs">{p.patch_id.slice(0, 12)}...</td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`px-2 py-0.5 text-xs rounded-full ${
+                              p.predicted_label === "tumor"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-green-100 text-green-700"
+                            }`}
+                          >
+                            {p.predicted_label}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">{(conf * 100).toFixed(1)}%</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Predictions table */}
-      {predictions.length > 0 && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-3">
-            Patch Predictions (first {predictions.length})
-          </h2>
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-left px-3 py-2">Patch ID</th>
-                <th className="text-left px-3 py-2">Prediction</th>
-                <th className="text-left px-3 py-2">Confidence</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {predictions.map((p) => {
-                const conf = Math.max(...p.probabilities);
-                return (
-                  <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 font-mono text-xs">{p.patch_id.slice(0, 12)}...</td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={`px-2 py-0.5 text-xs rounded-full ${
-                          p.predicted_label === "tumor"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-green-100 text-green-700"
-                        }`}
-                      >
-                        {p.predicted_label}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">{(conf * 100).toFixed(1)}%</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      {/* AI Report tab */}
+      {activeTab === "report" && job.status === "complete" && (
+        <ReportPanel jobId={id} />
       )}
     </div>
   );
