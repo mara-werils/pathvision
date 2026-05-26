@@ -10,10 +10,17 @@ type Stats = {
   embeddings: number;
   classifiers: number;
   ready_classifiers: number;
+  doctor_classifiers?: number;
   inference_jobs: number;
   labels?: number;
   interactive_labels?: number;
   interactive_classes?: Record<string, number>;
+};
+
+type SlideInfo = {
+  id: string;
+  filename: string;
+  status: string;
 };
 
 type Activity = {
@@ -30,6 +37,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [fetchState, setFetchState] = useState<FetchState>("loading");
+  const [labelSlide, setLabelSlide] = useState<SlideInfo | null>(null);
 
   useEffect(() => {
     Promise.allSettled([
@@ -39,6 +47,13 @@ export default function Dashboard() {
       fetch(`${API_URL}/api/v1/dashboard/recent`)
         .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
         .then(setActivity),
+      // Find first slide with embeddings for direct "Start Labeling" link
+      fetch(`${API_URL}/api/v1/slides`)
+        .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+        .then((slides: SlideInfo[]) => {
+          const tiled = slides.find((s) => s.status === "tiled");
+          if (tiled) setLabelSlide(tiled);
+        }),
     ]).then((results) => {
       setFetchState(results.every((r) => r.status === "rejected") ? "error" : "loaded");
     });
@@ -67,10 +82,10 @@ export default function Dashboard() {
   const hasEmbeddings = (stats?.embeddings ?? 0) > 0;
   const labelCount = stats?.interactive_labels ?? 0;
   const hasLabels = labelCount >= 10;
-  const hasClassifiers = (stats?.ready_classifiers ?? 0) > 0;
+  const hasDoctorClassifiers = (stats?.doctor_classifiers ?? 0) > 0;
 
-  // Determine current workflow step
-  const currentStep = !hasSlides ? 1 : !hasEmbeddings ? 2 : labelCount < 100 ? 3 : !hasClassifiers ? 4 : 5;
+  // Determine current workflow step — only doctor-trained classifiers count
+  const currentStep = !hasSlides ? 1 : !hasEmbeddings ? 2 : !hasLabels ? 3 : !hasDoctorClassifiers ? 4 : 5;
 
   const steps = [
     {
@@ -90,24 +105,25 @@ export default function Dashboard() {
     {
       n: 3,
       label: "Label",
-      desc: `Doctor labels patches (${labelCount}/100)`,
-      href: "/slides",
+      desc: `Doctor labels patches (${labelCount}/${labelCount >= 10 ? 100 : 10})`,
+      href: labelSlide ? `/slides/${labelSlide.id}` : "/slides",
       done: labelCount >= 100,
-      active: hasEmbeddings && labelCount < 100,
+      active: hasEmbeddings && !hasLabels,
     },
     {
       n: 4,
       label: "Train",
       desc: "Build classifier from labels",
       href: "/classifiers/new",
-      done: hasClassifiers,
+      done: hasDoctorClassifiers,
+      active: hasLabels && !hasDoctorClassifiers,
     },
     {
       n: 5,
       label: "Predict",
       desc: "Run inference & refine",
-      href: "/inference",
-      done: (stats?.inference_jobs ?? 0) > 0,
+      href: labelSlide ? `/slides/${labelSlide.id}` : "/inference",
+      done: hasDoctorClassifiers && (stats?.inference_jobs ?? 0) > 0,
     },
   ];
 
@@ -191,8 +207,8 @@ export default function Dashboard() {
               />
             </div>
             <p className="text-xs text-indigo-500">{labelCount} / 100 labels — {labelCount < 10 ? "need at least 10 to train" : "ready to train, more labels = better accuracy"}</p>
-            <Link href="/slides" className="inline-flex items-center gap-1 mt-3 text-sm text-indigo-600 font-medium hover:underline">
-              Start Labeling
+            <Link href={labelSlide ? `/slides/${labelSlide.id}` : "/slides"} className="inline-flex items-center gap-1 mt-3 text-sm text-indigo-600 font-medium hover:underline">
+              {labelSlide ? `Start Labeling on ${labelSlide.filename}` : "Start Labeling"}
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
             </Link>
           </div>

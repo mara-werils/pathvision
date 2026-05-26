@@ -27,6 +27,11 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     ready_classifiers = await db.scalar(
         select(func.count(Classifier.id)).where(Classifier.status == "ready")
     ) or 0
+    doctor_classifiers = await db.scalar(
+        select(func.count(Classifier.id)).where(
+            Classifier.status == "ready", Classifier.label_source == "interactive"
+        )
+    ) or 0
     labels_count = await db.scalar(select(func.count(PatchLabel.id))) or 0
     interactive_labels = await db.scalar(
         select(func.count(PatchLabel.id)).where(PatchLabel.label_source == "interactive")
@@ -53,6 +58,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         "classifiers": classifiers_count,
         "ready_classifiers": ready_classifiers,
         "inference_jobs": jobs_count,
+        "doctor_classifiers": doctor_classifiers,
         "labels": labels_count,
         "interactive_labels": interactive_labels,
         "label_classes": label_classes,
