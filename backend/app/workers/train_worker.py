@@ -34,12 +34,16 @@ def train_classifier(self, classifier_id: str) -> dict:
         class_names = clf_record.class_names  # list[str]
         class_to_idx = {name: i for i, name in enumerate(class_names)}
 
-        # Get all labeled patches that have embeddings
-        rows = db.execute(
+        # Get labeled patches that have embeddings, filtered by label_source if set
+        query = (
             select(Embedding.vector, PatchLabel.label)
             .join(PatchLabel, PatchLabel.patch_id == Embedding.patch_id)
             .where(PatchLabel.label.in_(class_names))
-        ).all()
+        )
+        if clf_record.label_source:
+            query = query.where(PatchLabel.label_source == clf_record.label_source)
+
+        rows = db.execute(query).all()
 
         if len(rows) < 10:
             clf_record.status = "error"

@@ -9,6 +9,7 @@ class ClassifierCreate(BaseModel):
     name: str
     description: Optional[str] = None
     class_names: list[str]
+    label_source: Optional[str] = None  # "interactive", "csv_upload", or None for all
 
 
 class ClassifierOut(BaseModel):
@@ -18,6 +19,7 @@ class ClassifierOut(BaseModel):
     class_names: list[str]
     n_classes: int
     n_training_samples: Optional[int] = None
+    label_source: Optional[str] = None
     metrics: Optional[dict] = None
     status: str
     created_at: datetime

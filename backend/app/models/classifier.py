@@ -17,4 +17,5 @@ class Classifier(Base, UUIDMixin, TimestampMixin):
     n_training_samples: Mapped[Optional[int]] = mapped_column(Integer)
     model_path: Mapped[Optional[str]] = mapped_column(String(500))
     metrics: Mapped[Optional[dict]] = mapped_column(JSONB)
+    label_source: Mapped[Optional[str]] = mapped_column(String(50))
     status: Mapped[str] = mapped_column(String(50), default="training")

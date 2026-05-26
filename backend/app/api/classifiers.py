@@ -31,6 +31,7 @@ async def train_classifier(
         description=req.description,
         class_names=req.class_names,
         n_classes=len(req.class_names),
+        label_source=req.label_source,
         status="training",
     )
     db.add(clf)

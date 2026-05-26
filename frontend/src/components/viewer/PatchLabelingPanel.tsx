@@ -118,8 +118,9 @@ export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabeli
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: trainingName.trim() || `Classifier from ${totalLabeled} labels`,
-          description: `Trained on ${totalLabeled} doctor-labeled patches`,
+          description: `Trained on ${totalLabeled} doctor-labeled patches (interactive only)`,
           class_names: classes,
+          label_source: "interactive",
         }),
       });
       if (!res.ok) {

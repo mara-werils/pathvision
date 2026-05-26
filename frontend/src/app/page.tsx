@@ -12,6 +12,8 @@ type Stats = {
   ready_classifiers: number;
   inference_jobs: number;
   labels?: number;
+  interactive_labels?: number;
+  interactive_classes?: Record<string, number>;
 };
 
 type Activity = {
@@ -63,7 +65,7 @@ export default function Dashboard() {
 
   const hasSlides = (stats?.slides ?? 0) > 0;
   const hasEmbeddings = (stats?.embeddings ?? 0) > 0;
-  const labelCount = stats?.labels ?? 0;
+  const labelCount = stats?.interactive_labels ?? 0;
   const hasLabels = labelCount >= 10;
   const hasClassifiers = (stats?.ready_classifiers ?? 0) > 0;
 
@@ -257,7 +259,7 @@ export default function Dashboard() {
         {[
           { label: "Slides", value: stats?.slides, href: "/slides" },
           { label: "Patches", value: stats?.patches, href: "/slides" },
-          { label: "Labels", value: labelCount, href: "/slides" },
+          { label: "Doctor Labels", value: labelCount, href: "/slides" },
           { label: "Classifiers", value: stats?.classifiers, sub: stats ? `${stats.ready_classifiers} ready` : undefined, href: "/classifiers" },
           { label: "Inference Jobs", value: stats?.inference_jobs, href: "/inference" },
         ].map((s) => (
