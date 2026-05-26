@@ -6,6 +6,9 @@ import Link from "next/link";
 import { API_URL } from "@/lib/api";
 import type { InferenceJob, PatchPrediction } from "@/lib/types";
 import WSIHeatmapViewer from "@/components/viewer/WSIHeatmapViewer";
+import SlideDiagnosis from "@/components/viewer/SlideDiagnosis";
+import RegionPanel from "@/components/viewer/RegionPanel";
+import ReportPanel from "@/components/inference/ReportPanel";
 
 export default function InferenceResultPage() {
   const { id } = useParams<{ id: string }>();
@@ -73,12 +76,12 @@ export default function InferenceResultPage() {
                 Export CSV
               </a>
               <a
-                href={`${API_URL}/api/v1/inference/${id}/export/pdf`}
+                href={`${API_URL}/api/v1/inference/${id}/export/report`}
                 download
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
-                Export PDF
+                AI Report PDF
               </a>
             </>
           )}
@@ -112,11 +115,26 @@ export default function InferenceResultPage() {
         </div>
       )}
 
+      {/* Slide-Level Diagnosis */}
+      {job.status === "complete" && (
+        <SlideDiagnosis jobId={id} />
+      )}
+
       {/* Heatmap Overlay */}
       {job.status === "complete" && (
         <div className="mb-6">
           <WSIHeatmapViewer jobId={id} slideId={job.slide_id} />
         </div>
+      )}
+
+      {/* Detected Tumor Regions */}
+      {job.status === "complete" && (
+        <RegionPanel jobId={id} />
+      )}
+
+      {/* AI Pathology Report */}
+      {job.status === "complete" && (
+        <ReportPanel jobId={id} />
       )}
 
       {/* Summary */}

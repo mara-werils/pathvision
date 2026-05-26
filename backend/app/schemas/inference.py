@@ -32,3 +32,66 @@ class PatchPredictionOut(BaseModel):
     probabilities: list[float]
 
     model_config = {"from_attributes": True}
+
+
+# --- Slide-Level Diagnosis (MIL) ---
+
+class AttentionPatchOut(BaseModel):
+    patch_id: str
+    x: int
+    y: int
+    attention_weight: float
+    predicted_label: str
+
+
+class SpatialSummaryOut(BaseModel):
+    tumor_clusters: int
+    largest_cluster_area_mm2: float
+
+
+class SlideDiagnosisOut(BaseModel):
+    slide_id: str
+    diagnosis: str
+    confidence: float
+    class_probabilities: dict[str, float]
+    total_patches: int
+    tumor_patches: int
+    tumor_percentage: float
+    top_attention_patches: list[AttentionPatchOut]
+    spatial_summary: SpatialSummaryOut
+
+
+# --- Spatial Clustering / ROI ---
+
+class TopPatchOut(BaseModel):
+    patch_id: str
+    x: int
+    y: int
+    confidence: float
+
+
+class CentroidOut(BaseModel):
+    x: float
+    y: float
+
+
+class RegionOut(BaseModel):
+    id: int
+    label: str
+    patch_count: int
+    area_mm2: float
+    avg_confidence: float
+    centroid: CentroidOut
+    boundary: list[list[float]]
+    top_patches: list[TopPatchOut]
+
+
+class RegionSummaryOut(BaseModel):
+    total_regions: int
+    total_tumor_area_mm2: float
+    slide_tumor_percentage: float
+
+
+class RegionsResponse(BaseModel):
+    regions: list[RegionOut]
+    summary: RegionSummaryOut

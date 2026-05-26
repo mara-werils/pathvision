@@ -15,7 +15,15 @@ from app.models.inference_job import InferenceJob
 from app.models.patch import Patch
 from app.models.patch_prediction import PatchPrediction
 from app.models.slide import Slide
-from app.schemas.inference import InferenceJobOut, InferenceRequest, PatchPredictionOut
+from app.schemas.inference import (
+    InferenceJobOut,
+    InferenceRequest,
+    PatchPredictionOut,
+    RegionsResponse,
+    SlideDiagnosisOut,
+)
+from app.services.mil_service import MILService, PatchInfo as MILPatchInfo
+from app.services.spatial_service import PatchInfo as SpatialPatchInfo, SpatialService
 
 router = APIRouter()
 
@@ -266,6 +274,186 @@ async def export_predictions_pdf(job_id: uuid.UUID, db: AsyncSession = Depends(g
         buf,
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=report_{job_id}.pdf"},
+    )
+
+
+@router.get("/{job_id}/slide-diagnosis", response_model=SlideDiagnosisOut)
+async def get_slide_diagnosis(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Compute slide-level diagnosis using MIL attention aggregation."""
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+    if job.status != "complete":
+        raise HTTPException(status_code=400, detail="Inference job is not complete yet")
+
+    classifier = await db.get(Classifier, job.classifier_id)
+    class_names = list(classifier.class_names) if classifier and classifier.class_names else None
+
+    result = await db.execute(
+        select(
+            PatchPrediction.patch_id, Patch.x, Patch.y,
+            PatchPrediction.predicted_class, PatchPrediction.predicted_label,
+            PatchPrediction.probabilities,
+        )
+        .join(Patch, PatchPrediction.patch_id == Patch.id)
+        .where(PatchPrediction.inference_job_id == job_id)
+    )
+    rows = result.all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="No predictions found for this job")
+
+    patches = [
+        MILPatchInfo(
+            patch_id=row.patch_id, x=row.x, y=row.y,
+            predicted_class=row.predicted_class,
+            predicted_label=row.predicted_label,
+            probabilities=row.probabilities,
+        )
+        for row in rows
+    ]
+
+    mil = MILService()
+    diagnosis = mil.aggregate(slide_id=job.slide_id, patches=patches, class_names=class_names)
+    return SlideDiagnosisOut(
+        slide_id=str(diagnosis.slide_id),
+        diagnosis=diagnosis.diagnosis,
+        confidence=diagnosis.confidence,
+        class_probabilities=diagnosis.class_probabilities,
+        total_patches=diagnosis.total_patches,
+        tumor_patches=diagnosis.tumor_patches,
+        tumor_percentage=diagnosis.tumor_percentage,
+        top_attention_patches=diagnosis.top_attention_patches,
+        spatial_summary=diagnosis.spatial_summary,
+    )
+
+
+@router.post("/{job_id}/regions", response_model=RegionsResponse)
+async def detect_regions(
+    job_id: uuid.UUID, target_label: str = "tumor",
+    db: AsyncSession = Depends(get_db),
+):
+    """Detect spatially coherent tumor regions using DBSCAN clustering."""
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+    if job.status != "complete":
+        raise HTTPException(status_code=400, detail="Inference job is not complete")
+
+    result = await db.execute(
+        select(
+            PatchPrediction.patch_id, Patch.x, Patch.y, Patch.magnification,
+            PatchPrediction.predicted_class, PatchPrediction.predicted_label,
+            PatchPrediction.probabilities,
+        )
+        .join(Patch, PatchPrediction.patch_id == Patch.id)
+        .where(PatchPrediction.inference_job_id == job_id)
+    )
+    rows = result.all()
+    if not rows:
+        return RegionsResponse(
+            regions=[],
+            summary={"total_regions": 0, "total_tumor_area_mm2": 0.0, "slide_tumor_percentage": 0.0},
+        )
+
+    magnification = rows[0].magnification or 40.0
+    patch_infos = []
+    for row in rows:
+        probs = row.probabilities
+        if isinstance(probs, dict):
+            probs = list(probs.values())
+        patch_infos.append(SpatialPatchInfo(
+            patch_id=str(row.patch_id), x=row.x, y=row.y,
+            predicted_class=row.predicted_class,
+            predicted_label=row.predicted_label,
+            confidence=max(probs) if probs else 0.0,
+        ))
+
+    slide = await db.get(Slide, job.slide_id)
+    total_slide_patches = slide.tile_count if slide and slide.tile_count else len(rows)
+
+    service = SpatialService()
+    spatial_result = service.detect_regions(
+        patches=patch_infos, target_label=target_label,
+        magnification=magnification, total_slide_patches=total_slide_patches,
+    )
+    return RegionsResponse(
+        regions=[
+            {"id": r.id, "label": r.label, "patch_count": r.patch_count,
+             "area_mm2": r.area_mm2, "avg_confidence": r.avg_confidence,
+             "centroid": r.centroid, "boundary": r.boundary, "top_patches": r.top_patches}
+            for r in spatial_result.regions
+        ],
+        summary={
+            "total_regions": spatial_result.summary.total_regions,
+            "total_tumor_area_mm2": spatial_result.summary.total_tumor_area_mm2,
+            "slide_tumor_percentage": spatial_result.summary.slide_tumor_percentage,
+        },
+    )
+
+
+async def _build_report_data(job_id: uuid.UUID, db: AsyncSession) -> dict:
+    """Gather all data needed for AI report generation."""
+    from app.services.report_service import (
+        _compute_confidence_stats,
+        _count_tumor_regions,
+        generate_report_json,
+    )
+
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+    if job.status != "complete":
+        raise HTTPException(status_code=400, detail="Inference job is not complete")
+
+    slide = await db.get(Slide, job.slide_id)
+    classifier = await db.get(Classifier, job.classifier_id)
+
+    result = await db.execute(
+        select(PatchPrediction.predicted_label, PatchPrediction.predicted_class, func.count().label("count"))
+        .where(PatchPrediction.inference_job_id == job_id)
+        .group_by(PatchPrediction.predicted_label, PatchPrediction.predicted_class)
+        .order_by(PatchPrediction.predicted_class)
+    )
+    class_rows = result.all()
+    total_patches = sum(r.count for r in class_rows)
+    class_counts = [{"label": r.predicted_label, "class_idx": r.predicted_class, "count": r.count} for r in class_rows]
+
+    result = await db.execute(
+        select(PatchPrediction.predicted_label, PatchPrediction.probabilities, Patch.x, Patch.y)
+        .join(Patch, PatchPrediction.patch_id == Patch.id)
+        .where(PatchPrediction.inference_job_id == job_id)
+    )
+    all_preds = result.all()
+    confidence_stats = _compute_confidence_stats([r.probabilities for r in all_preds])
+    tumor_regions = _count_tumor_regions([{"predicted_label": r.predicted_label, "x": r.x, "y": r.y} for r in all_preds])
+
+    return generate_report_json(
+        job_id=job_id,
+        slide={"filename": slide.filename if slide else "N/A", "width": slide.width if slide else None,
+               "height": slide.height if slide else None, "magnification": slide.magnification if slide else None,
+               "vendor": slide.vendor if slide else None},
+        classifier={"name": classifier.name if classifier else "N/A", "metrics": classifier.metrics if classifier else {}},
+        class_counts=class_counts, total_patches=total_patches,
+        confidence_stats=confidence_stats, tumor_regions=tumor_regions,
+        embedding_model="path-foundation-v1",
+    )
+
+
+@router.get("/{job_id}/report")
+async def get_inference_report(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Return a structured AI-assisted pathology report as JSON."""
+    return await _build_report_data(job_id, db)
+
+
+@router.get("/{job_id}/export/report")
+async def export_report_pdf(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Generate a professional AI-assisted pathology report as PDF."""
+    from app.services.report_service import generate_report_pdf
+    report = await _build_report_data(job_id, db)
+    buf = generate_report_pdf(report)
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=pathology_report_{job_id}.pdf"},
     )
 
 

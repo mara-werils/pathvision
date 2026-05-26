@@ -7,6 +7,8 @@ import { API_URL } from "@/lib/api";
 import type { Slide, Patch, Classifier } from "@/lib/types";
 import WSIViewer from "@/components/viewer/WSIViewer";
 import PatchLabelingPanel from "@/components/viewer/PatchLabelingPanel";
+import ModelSelector from "@/components/viewer/ModelSelector";
+import EmbeddingExplorer from "@/components/viewer/EmbeddingExplorer";
 
 export default function SlideDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +24,8 @@ export default function SlideDetailPage() {
   const [selectedClassifier, setSelectedClassifier] = useState<string>("");
   const [inferenceLoading, setInferenceLoading] = useState(false);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState("path-foundation-v1");
+  const [showExplorer, setShowExplorer] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/api/v1/slides/${id}`).then((r) => r.json()).then(setSlide);
@@ -63,7 +67,7 @@ export default function SlideDetailPage() {
     const res = await fetch(`${API_URL}/api/v1/embeddings/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slide_id: id }),
+      body: JSON.stringify({ slide_id: id, model_id: selectedModel }),
     });
     const data = await res.json();
     if (data.task_id) {
@@ -237,16 +241,21 @@ export default function SlideDetailPage() {
           ) : embedding?.status === "done" ? (
             <p className="text-green-600 text-sm">Embeddings generated successfully. You can now start labeling below.</p>
           ) : (
-            <button
-              onClick={generateEmbeddings}
-              className={`px-4 py-2 rounded-lg transition ${
-                hasEmbeddings
-                  ? "bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm"
-                  : "bg-indigo-600 text-white hover:bg-indigo-700"
-              }`}
-            >
-              {hasEmbeddings ? "Regenerate Embeddings" : "Generate Embeddings"}
-            </button>
+            <div className="space-y-3">
+              <div className="max-w-sm">
+                <ModelSelector value={selectedModel} onChange={setSelectedModel} />
+              </div>
+              <button
+                onClick={generateEmbeddings}
+                className={`px-4 py-2 rounded-lg transition ${
+                  hasEmbeddings
+                    ? "bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm"
+                    : "bg-indigo-600 text-white hover:bg-indigo-700"
+                }`}
+              >
+                {hasEmbeddings ? "Regenerate Embeddings" : "Generate Embeddings"}
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -318,6 +327,22 @@ export default function SlideDetailPage() {
 
       {/* WSI Viewer */}
       <WSIViewer slideId={id} />
+
+      {/* Embedding Space Explorer */}
+      {isTiled && hasEmbeddings && (
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <button
+            onClick={() => setShowExplorer(!showExplorer)}
+            className="flex items-center gap-2 text-sm font-semibold text-gray-700 hover:text-indigo-600 transition"
+          >
+            <svg className={`w-4 h-4 transition-transform ${showExplorer ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            Embedding Space Explorer
+          </button>
+          {showExplorer && <div className="mt-4"><EmbeddingExplorer slideId={id} /></div>}
+        </div>
+      )}
 
       {/* Patch grid */}
       {patches.length > 0 && (
