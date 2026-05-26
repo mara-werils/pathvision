@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { API_URL } from "@/lib/api";
 import type { Slide, Patch } from "@/lib/types";
 import WSIViewer from "@/components/viewer/WSIViewer";
+import EmbeddingExplorer from "@/components/viewer/EmbeddingExplorer";
 
 export default function SlideDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -12,10 +13,16 @@ export default function SlideDetailPage() {
   const [patches, setPatches] = useState<Patch[]>([]);
   const [embedding, setEmbedding] = useState<{ status: string; current?: number; total?: number } | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [embeddingCount, setEmbeddingCount] = useState<number>(0);
+  const [explorerOpen, setExplorerOpen] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/api/v1/slides/${id}`).then((r) => r.json()).then(setSlide);
     fetch(`${API_URL}/api/v1/slides/${id}/patches?limit=50`).then((r) => r.json()).then(setPatches);
+    fetch(`${API_URL}/api/v1/embeddings/slide/${id}/count`)
+      .then((r) => r.json())
+      .then((d) => setEmbeddingCount(d.count || 0))
+      .catch(() => {});
   }, [id]);
 
   // Poll embedding status
@@ -127,6 +134,37 @@ export default function SlideDetailPage() {
 
       {/* WSI Viewer */}
       <WSIViewer slideId={id} />
+
+      {/* Embedding Space Explorer */}
+      {embeddingCount > 0 && (
+        <div className="mb-6">
+          <button
+            onClick={() => setExplorerOpen((v) => !v)}
+            className="flex items-center gap-2 w-full text-left bg-white rounded-lg shadow px-6 py-4 hover:bg-gray-50 transition"
+          >
+            <span
+              className="text-gray-400 text-xs transition-transform"
+              style={{
+                display: "inline-block",
+                transform: explorerOpen ? "rotate(90deg)" : "rotate(0deg)",
+              }}
+            >
+              &#9654;
+            </span>
+            <span className="text-lg font-semibold">
+              Embedding Space Explorer
+            </span>
+            <span className="text-xs text-gray-400 ml-2">
+              {embeddingCount} embeddings
+            </span>
+          </button>
+          {explorerOpen && (
+            <div className="mt-2">
+              <EmbeddingExplorer slideId={id} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Thumbnail */}
       {slide.thumbnail_path && (
