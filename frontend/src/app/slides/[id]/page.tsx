@@ -26,12 +26,10 @@ export default function SlideDetailPage() {
   useEffect(() => {
     fetch(`${API_URL}/api/v1/slides/${id}`).then((r) => r.json()).then(setSlide);
     fetch(`${API_URL}/api/v1/slides/${id}/patches?limit=50`).then((r) => r.json()).then(setPatches);
-    // Fetch embedding count for this slide
     fetch(`${API_URL}/api/v1/embeddings/slide/${id}/count`)
       .then((r) => r.json())
       .then((data) => setEmbeddingCount(data.count ?? data))
       .catch(() => {});
-    // Fetch available classifiers for inference
     fetch(`${API_URL}/api/v1/classifiers`)
       .then((r) => r.json())
       .then((data: Classifier[]) => {
@@ -52,7 +50,6 @@ export default function SlideDetailPage() {
       if (data.status === "done" || data.status === "error") {
         clearInterval(interval);
         setTaskId(null);
-        // Refresh embedding count
         fetch(`${API_URL}/api/v1/embeddings/slide/${id}/count`)
           .then((r) => r.json())
           .then((d) => setEmbeddingCount(d.count ?? d))
@@ -105,6 +102,10 @@ export default function SlideDetailPage() {
   );
 
   const hasEmbeddings = embeddingCount !== null && embeddingCount > 0;
+  const isTiled = slide.status === "tiled";
+
+  // Determine current workflow step for this slide
+  const step = !isTiled ? 0 : !hasEmbeddings ? 1 : 2;
 
   return (
     <div>
@@ -122,7 +123,6 @@ export default function SlideDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Export Patch IDs */}
           {slide.tile_count > 0 && (
             <a
               href={`${API_URL}/api/v1/slides/${id}/export/patches/csv`}
@@ -147,6 +147,33 @@ export default function SlideDetailPage() {
         </div>
       </div>
 
+      {/* Slide Workflow Guide */}
+      {isTiled && (
+        <div className="bg-white rounded-lg shadow p-4 mb-6">
+          <div className="flex items-center gap-6 text-sm">
+            {[
+              { label: "Embeddings", done: hasEmbeddings, active: step === 1 },
+              { label: "Label Patches", done: false, active: step === 2 && !classifiers.length },
+              { label: "Train & Predict", done: false, active: step === 2 && classifiers.length > 0 },
+            ].map((s, i) => (
+              <div key={s.label} className="flex items-center gap-2">
+                {i > 0 && <div className={`w-6 h-px ${s.done ? "bg-green-400" : "bg-gray-200"}`} />}
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-semibold ${
+                  s.done ? "bg-green-600 text-white" : s.active ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-500"
+                }`}>
+                  {s.done ? (
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                  ) : (
+                    i + 1
+                  )}
+                </div>
+                <span className={`${s.active ? "text-indigo-700 font-medium" : "text-gray-500"}`}>{s.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-lg shadow p-4">
@@ -169,10 +196,17 @@ export default function SlideDetailPage() {
         </div>
       </div>
 
-      {/* Embedding generation */}
-      {slide.status === "tiled" && (
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-3">Embeddings</h2>
+      {/* Embedding generation — compact when already done */}
+      {isTiled && (
+        <div className={`bg-white rounded-lg shadow p-6 mb-6 ${hasEmbeddings ? "" : "border-2 border-indigo-200"}`}>
+          <h2 className="text-lg font-semibold mb-3">
+            {hasEmbeddings ? "Embeddings" : "Step 1: Generate Embeddings"}
+          </h2>
+          {!hasEmbeddings && (
+            <p className="text-sm text-gray-500 mb-3">
+              Embeddings are required before labeling. This converts each patch into a vector for the AI model.
+            </p>
+          )}
           {embedding && embedding.status === "running" ? (
             <div>
               <p className="text-sm text-gray-600 mb-2">
@@ -188,11 +222,15 @@ export default function SlideDetailPage() {
               </div>
             </div>
           ) : embedding?.status === "done" ? (
-            <p className="text-green-600 text-sm">Embeddings generated successfully.</p>
+            <p className="text-green-600 text-sm">Embeddings generated successfully. You can now start labeling below.</p>
           ) : (
             <button
               onClick={generateEmbeddings}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+              className={`px-4 py-2 rounded-lg transition ${
+                hasEmbeddings
+                  ? "bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm"
+                  : "bg-indigo-600 text-white hover:bg-indigo-700"
+              }`}
             >
               {hasEmbeddings ? "Regenerate Embeddings" : "Generate Embeddings"}
             </button>
@@ -200,17 +238,26 @@ export default function SlideDetailPage() {
         </div>
       )}
 
-      {/* Run Inference */}
-      {slide.status === "tiled" && hasEmbeddings && (
+      {/* Patch Labeling — THE MAIN SECTION */}
+      {isTiled && hasEmbeddings && (
+        <PatchLabelingPanel slideId={id} classifiers={classifiers} />
+      )}
+
+      {/* Prompt to generate embeddings if not yet done */}
+      {isTiled && !hasEmbeddings && !embedding && (
+        <div className="bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 p-8 mb-6 text-center">
+          <p className="text-gray-500 text-sm mb-2">Generate embeddings above to start labeling patches</p>
+          <p className="text-gray-400 text-xs">The labeling panel will appear here once embeddings are ready</p>
+        </div>
+      )}
+
+      {/* Run Inference — below labeling */}
+      {isTiled && hasEmbeddings && (
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <h2 className="text-lg font-semibold mb-3">Run Inference</h2>
           {classifiers.length === 0 ? (
             <p className="text-sm text-gray-500">
-              No trained classifiers available.{" "}
-              <a href="/classifiers/new" className="text-indigo-600 hover:underline">
-                Train a classifier
-              </a>{" "}
-              first.
+              Train a classifier from your labels first. Use the <strong>Train Classifier</strong> button in the labeling panel above.
             </p>
           ) : (
             <div className="flex items-end gap-4">
@@ -254,11 +301,6 @@ export default function SlideDetailPage() {
             <p className="text-red-600 text-sm mt-3">{inferenceError}</p>
           )}
         </div>
-      )}
-
-      {/* Patch Labeling */}
-      {slide.status === "tiled" && hasEmbeddings && (
-        <PatchLabelingPanel slideId={id} classifiers={classifiers} />
       )}
 
       {/* WSI Viewer */}

@@ -11,6 +11,7 @@ from app.models.classifier import Classifier
 from app.models.embedding import Embedding
 from app.models.inference_job import InferenceJob
 from app.models.patch import Patch
+from app.models.patch_label import PatchLabel
 from app.models.slide import Slide
 
 router = APIRouter()
@@ -26,6 +27,13 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     ready_classifiers = await db.scalar(
         select(func.count(Classifier.id)).where(Classifier.status == "ready")
     ) or 0
+    labels_count = await db.scalar(select(func.count(PatchLabel.id))) or 0
+
+    # Label class distribution
+    label_rows = await db.execute(
+        select(PatchLabel.label, func.count(PatchLabel.id)).group_by(PatchLabel.label)
+    )
+    label_classes = {row[0]: row[1] for row in label_rows.all()}
 
     return {
         "slides": slides_count,
@@ -34,6 +42,8 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         "classifiers": classifiers_count,
         "ready_classifiers": ready_classifiers,
         "inference_jobs": jobs_count,
+        "labels": labels_count,
+        "label_classes": label_classes,
     }
 
 

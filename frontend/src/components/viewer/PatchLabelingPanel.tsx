@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { API_URL } from "@/lib/api";
 import type { Classifier, Patch, LabelSummary, UncertainPatch } from "@/lib/types";
 
@@ -9,7 +10,11 @@ interface PatchLabelingPanelProps {
   classifiers: Classifier[];
 }
 
+const RECOMMENDED_LABELS = 100;
+const MIN_LABELS = 10;
+
 export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabelingPanelProps) {
+  const router = useRouter();
   const [summary, setSummary] = useState<LabelSummary | null>(null);
   const [patches, setPatches] = useState<Patch[]>([]);
   const [labeledMap, setLabeledMap] = useState<Record<string, string>>({});
@@ -18,12 +23,21 @@ export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabeli
   const [classes, setClasses] = useState<string[]>(["normal", "tumor"]);
   const [loadingPatches, setLoadingPatches] = useState(false);
 
+  // Inline training state
+  const [trainingName, setTrainingName] = useState("");
+  const [training, setTraining] = useState(false);
+  const [trainError, setTrainError] = useState<string | null>(null);
+
   // Active learning state
   const [alClassifier, setAlClassifier] = useState<string>(classifiers[0]?.id || "");
   const [uncertainPatches, setUncertainPatches] = useState<UncertainPatch[]>([]);
   const [alLoading, setAlLoading] = useState(false);
   const [alError, setAlError] = useState<string | null>(null);
   const [alLabeledMap, setAlLabeledMap] = useState<Record<string, string>>({});
+
+  const totalLabeled = summary?.total_labeled ?? 0;
+  const canTrain = totalLabeled >= MIN_LABELS;
+  const progress = Math.min(100, Math.round((totalLabeled / RECOMMENDED_LABELS) * 100));
 
   const fetchSummary = useCallback(() => {
     fetch(`${API_URL}/api/v1/slides/${slideId}/labels/summary`)
@@ -94,6 +108,33 @@ export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabeli
     }
   };
 
+  const trainClassifier = async () => {
+    if (!canTrain) return;
+    setTraining(true);
+    setTrainError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/classifiers/train`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: trainingName.trim() || `Classifier from ${totalLabeled} labels`,
+          description: `Trained on ${totalLabeled} doctor-labeled patches`,
+          class_names: classes,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(body || `Error ${res.status}`);
+      }
+      const clf = await res.json();
+      router.push(`/classifiers/${clf.id}`);
+    } catch (err: any) {
+      setTrainError(err.message || "Training failed to start");
+    } finally {
+      setTraining(false);
+    }
+  };
+
   const suggestUncertain = async () => {
     if (!alClassifier) return;
     setAlLoading(true);
@@ -133,7 +174,31 @@ export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabeli
 
   return (
     <div className="bg-white rounded-lg shadow p-6 mb-6">
-      <h2 className="text-lg font-semibold mb-4">Patch Labeling</h2>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-lg font-semibold">Patch Labeling</h2>
+        <span className="text-xs text-gray-400">
+          {totalLabeled} / {RECOMMENDED_LABELS} recommended
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      <div className="mb-4">
+        <div className="w-full bg-gray-100 rounded-full h-2">
+          <div
+            className={`h-2 rounded-full transition-all ${
+              totalLabeled >= RECOMMENDED_LABELS ? "bg-green-500" : totalLabeled >= MIN_LABELS ? "bg-indigo-500" : "bg-amber-400"
+            }`}
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="text-xs text-gray-400 mt-1">
+          {totalLabeled < MIN_LABELS
+            ? `Need at least ${MIN_LABELS} labels to train (${totalLabeled} so far)`
+            : totalLabeled < RECOMMENDED_LABELS
+            ? `${totalLabeled} labels — enough to train. ~${RECOMMENDED_LABELS} recommended for good accuracy`
+            : `${totalLabeled} labels — great coverage`}
+        </p>
+      </div>
 
       {/* Label Summary */}
       {summary && summary.total_labeled > 0 && (
@@ -147,7 +212,6 @@ export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabeli
               {cls}: {count}
             </span>
           ))}
-          <span className="text-xs text-gray-400">({summary.total_labeled} total)</span>
         </div>
       )}
 
@@ -187,9 +251,9 @@ export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabeli
       </div>
 
       {/* Patch grid for labeling */}
-      <div className="mb-6">
+      <div className="mb-4">
         <h3 className="text-sm font-medium text-gray-700 mb-2">
-          Click a class above, then click patches to label them
+          Select a class above, then click patches to label them
         </h3>
         {loadingPatches ? (
           <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -246,12 +310,60 @@ export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabeli
         )}
       </div>
 
+      {/* Inline Train Classifier */}
+      <div className="border-t pt-4 mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-gray-700">Train Classifier</h3>
+          {canTrain && (
+            <span className="text-xs text-green-600 font-medium">Ready to train</span>
+          )}
+        </div>
+        {!canTrain ? (
+          <p className="text-sm text-gray-400">
+            Label at least {MIN_LABELS} patches to enable training ({totalLabeled} so far).
+          </p>
+        ) : (
+          <div className="flex items-end gap-3">
+            <div className="flex-1 max-w-xs">
+              <label className="block text-xs text-gray-500 mb-1">Classifier name (optional)</label>
+              <input
+                type="text"
+                value={trainingName}
+                onChange={(e) => setTrainingName(e.target.value)}
+                placeholder={`Classifier from ${totalLabeled} labels`}
+                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+            <button
+              onClick={trainClassifier}
+              disabled={training}
+              className="px-5 py-1.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition font-medium flex items-center gap-2"
+            >
+              {training ? (
+                <>
+                  <div className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full" />
+                  Training...
+                </>
+              ) : (
+                <>
+                  Train on {totalLabeled} labels
+                </>
+              )}
+            </button>
+          </div>
+        )}
+        {trainError && <p className="text-red-600 text-sm mt-2">{trainError}</p>}
+      </div>
+
       {/* Active Learning Section */}
       <div className="border-t pt-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Active Learning</h3>
+        <h3 className="text-sm font-semibold text-gray-700 mb-1">Active Learning</h3>
+        <p className="text-xs text-gray-400 mb-3">
+          Use a trained classifier to find the most uncertain patches. Label them to improve accuracy the most.
+        </p>
         {classifiers.length === 0 ? (
           <p className="text-sm text-gray-400">
-            No trained classifiers available for active learning.
+            Train a classifier first to use active learning.
           </p>
         ) : (
           <>
@@ -291,7 +403,7 @@ export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabeli
             {uncertainPatches.length > 0 && (
               <div>
                 <p className="text-xs text-gray-500 mb-2">
-                  {uncertainPatches.length} most uncertain patches. Label them to improve the model.
+                  {uncertainPatches.length} most uncertain patches. Label them, then retrain for better accuracy.
                 </p>
                 <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3">
                   {uncertainPatches.map((up) => {
@@ -350,6 +462,22 @@ export default function PatchLabelingPanel({ slideId, classifiers }: PatchLabeli
                     );
                   })}
                 </div>
+
+                {/* After labeling uncertain patches, prompt retrain */}
+                {Object.keys(alLabeledMap).length > 0 && (
+                  <div className="mt-4 bg-emerald-50 rounded-lg p-3 flex items-center justify-between">
+                    <p className="text-sm text-emerald-800">
+                      Labeled {Object.keys(alLabeledMap).length} uncertain patches. Retrain to improve accuracy.
+                    </p>
+                    <button
+                      onClick={trainClassifier}
+                      disabled={training}
+                      className="px-4 py-1.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition font-medium"
+                    >
+                      {training ? "Training..." : "Retrain Now"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </>
