@@ -15,7 +15,13 @@ from app.models.inference_job import InferenceJob
 from app.models.patch import Patch
 from app.models.patch_prediction import PatchPrediction
 from app.models.slide import Slide
-from app.schemas.inference import InferenceJobOut, InferenceRequest, PatchPredictionOut
+from app.schemas.inference import (
+    InferenceJobOut,
+    InferenceRequest,
+    PatchPredictionOut,
+    RegionsResponse,
+)
+from app.services.spatial_service import PatchInfo, SpatialService
 
 router = APIRouter()
 
@@ -59,6 +65,94 @@ async def get_predictions(
         .limit(limit)
     )
     return result.scalars().all()
+
+
+@router.post("/{job_id}/regions", response_model=RegionsResponse)
+async def detect_regions(
+    job_id: uuid.UUID,
+    target_label: str = "tumor",
+    db: AsyncSession = Depends(get_db),
+):
+    """Detect spatially coherent tumor regions using DBSCAN clustering."""
+    job = await db.get(InferenceJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+    if job.status != "complete":
+        raise HTTPException(status_code=400, detail="Inference job is not complete")
+
+    # Fetch all predictions with patch coordinates
+    result = await db.execute(
+        select(
+            PatchPrediction.patch_id,
+            Patch.x,
+            Patch.y,
+            Patch.magnification,
+            PatchPrediction.predicted_class,
+            PatchPrediction.predicted_label,
+            PatchPrediction.probabilities,
+        )
+        .join(Patch, PatchPrediction.patch_id == Patch.id)
+        .where(PatchPrediction.inference_job_id == job_id)
+    )
+    rows = result.all()
+
+    if not rows:
+        return RegionsResponse(
+            regions=[],
+            summary={"total_regions": 0, "total_tumor_area_mm2": 0.0, "slide_tumor_percentage": 0.0},
+        )
+
+    # Determine magnification from first patch (or default 40x)
+    magnification = rows[0].magnification or 40.0
+
+    # Build PatchInfo list
+    patch_infos: list[PatchInfo] = []
+    for row in rows:
+        probs = row.probabilities
+        if isinstance(probs, dict):
+            probs = list(probs.values())
+        confidence = max(probs) if probs else 0.0
+        patch_infos.append(PatchInfo(
+            patch_id=str(row.patch_id),
+            x=row.x,
+            y=row.y,
+            predicted_class=row.predicted_class,
+            predicted_label=row.predicted_label,
+            confidence=confidence,
+        ))
+
+    # Get total slide patches for percentage calculation
+    slide = await db.get(Slide, job.slide_id)
+    total_slide_patches = slide.tile_count if slide and slide.tile_count else len(rows)
+
+    service = SpatialService()
+    spatial_result = service.detect_regions(
+        patches=patch_infos,
+        target_label=target_label,
+        magnification=magnification,
+        total_slide_patches=total_slide_patches,
+    )
+
+    return RegionsResponse(
+        regions=[
+            {
+                "id": r.id,
+                "label": r.label,
+                "patch_count": r.patch_count,
+                "area_mm2": r.area_mm2,
+                "avg_confidence": r.avg_confidence,
+                "centroid": r.centroid,
+                "boundary": r.boundary,
+                "top_patches": r.top_patches,
+            }
+            for r in spatial_result.regions
+        ],
+        summary={
+            "total_regions": spatial_result.summary.total_regions,
+            "total_tumor_area_mm2": spatial_result.summary.total_tumor_area_mm2,
+            "slide_tumor_percentage": spatial_result.summary.slide_tumor_percentage,
+        },
+    )
 
 
 def _resolve_path(db_path: str | None) -> Path | None:

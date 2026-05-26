@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { API_URL } from "@/lib/api";
 import type { InferenceJob, PatchPrediction } from "@/lib/types";
 import HeatmapOverlay from "@/components/viewer/HeatmapOverlay";
+import RegionPanel from "@/components/viewer/RegionPanel";
 
 export default function InferenceResultPage() {
   const { id } = useParams<{ id: string }>();
@@ -88,6 +89,13 @@ export default function InferenceResultPage() {
       {job.status === "complete" && (
         <div className="mb-6">
           <HeatmapOverlay jobId={id} slideId={job.slide_id} />
+        </div>
+      )}
+
+      {/* Tumor Region Detection */}
+      {job.status === "complete" && (
+        <div className="mb-6">
+          <RegionPanel jobId={id} />
         </div>
       )}
 
