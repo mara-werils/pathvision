@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { API_URL } from "@/lib/api";
 import type { Slide, Patch } from "@/lib/types";
 import WSIViewer from "@/components/viewer/WSIViewer";
+import ModelSelector from "@/components/viewer/ModelSelector";
 
 export default function SlideDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -12,6 +13,8 @@ export default function SlideDetailPage() {
   const [patches, setPatches] = useState<Patch[]>([]);
   const [embedding, setEmbedding] = useState<{ status: string; current?: number; total?: number } | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState("path-foundation-v1");
+  const [usedModel, setUsedModel] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`${API_URL}/api/v1/slides/${id}`).then((r) => r.json()).then(setSlide);
@@ -37,11 +40,12 @@ export default function SlideDetailPage() {
     const res = await fetch(`${API_URL}/api/v1/embeddings/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slide_id: id }),
+      body: JSON.stringify({ slide_id: id, model_id: selectedModel }),
     });
     const data = await res.json();
     if (data.task_id) {
       setTaskId(data.task_id);
+      setUsedModel(data.model_id);
       setEmbedding({ status: "starting" });
     }
   };
@@ -102,6 +106,9 @@ export default function SlideDetailPage() {
             <div>
               <p className="text-sm text-gray-600 mb-2">
                 Generating: {embedding.current}/{embedding.total} patches
+                {usedModel && (
+                  <span className="text-gray-400 ml-2">({usedModel})</span>
+                )}
               </p>
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div
@@ -113,14 +120,22 @@ export default function SlideDetailPage() {
               </div>
             </div>
           ) : embedding?.status === "done" ? (
-            <p className="text-green-600 text-sm">Embeddings generated successfully.</p>
+            <p className="text-green-600 text-sm">
+              Embeddings generated successfully
+              {usedModel && <span className="text-gray-400 ml-1">using {usedModel}</span>}.
+            </p>
           ) : (
-            <button
-              onClick={generateEmbeddings}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-            >
-              Generate Embeddings
-            </button>
+            <div className="space-y-3">
+              <div className="max-w-sm">
+                <ModelSelector value={selectedModel} onChange={setSelectedModel} />
+              </div>
+              <button
+                onClick={generateEmbeddings}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+              >
+                Generate Embeddings
+              </button>
+            </div>
           )}
         </div>
       )}

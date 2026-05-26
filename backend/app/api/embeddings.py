@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,16 +10,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_db
 from app.models.embedding import Embedding
 from app.models.slide import Slide
+from app.services.embedding_service import list_available_models, get_model_info, MODEL_REGISTRY
 
 router = APIRouter()
 
 
 class GenerateRequest(BaseModel):
     slide_id: uuid.UUID
+    model_id: str = "path-foundation-v1"
+
+
+@router.get("/models")
+async def get_available_models():
+    """Return list of all registered embedding models with metadata."""
+    return list_available_models()
 
 
 @router.post("/generate")
 async def generate_embeddings(req: GenerateRequest, db: AsyncSession = Depends(get_db)):
+    # Validate model_id
+    if req.model_id not in MODEL_REGISTRY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown model '{req.model_id}'. Available: {', '.join(MODEL_REGISTRY)}",
+        )
+
     slide = await db.get(Slide, req.slide_id)
     if not slide:
         raise HTTPException(status_code=404, detail="Slide not found")
@@ -27,8 +43,8 @@ async def generate_embeddings(req: GenerateRequest, db: AsyncSession = Depends(g
 
     from app.workers.embed_worker import generate_embeddings as embed_task
 
-    task = embed_task.delay(str(req.slide_id))
-    return {"task_id": task.id, "slide_id": str(req.slide_id)}
+    task = embed_task.delay(str(req.slide_id), req.model_id)
+    return {"task_id": task.id, "slide_id": str(req.slide_id), "model_id": req.model_id}
 
 
 @router.get("/status/{task_id}")
@@ -56,7 +72,7 @@ async def get_patch_embedding(patch_id: uuid.UUID, db: AsyncSession = Depends(ge
     emb = result.scalar_one_or_none()
     if not emb:
         raise HTTPException(status_code=404, detail="No embedding for this patch")
-    return {"patch_id": str(patch_id), "vector": emb.vector}
+    return {"patch_id": str(patch_id), "vector": emb.vector, "model_version": emb.model_version}
 
 
 @router.get("/slide/{slide_id}/count")
