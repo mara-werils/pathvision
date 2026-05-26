@@ -279,14 +279,22 @@ async def label_patch(
 
 
 @router.get("/{slide_id}/labels/summary")
-async def get_label_summary(slide_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    """Get label counts for a slide."""
-    result = await db.execute(
+async def get_label_summary(
+    slide_id: uuid.UUID,
+    source: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get label counts for a slide, optionally filtered by label_source."""
+    query = (
         select(PatchLabel.label, func.count().label("count"))
         .join(Patch, PatchLabel.patch_id == Patch.id)
         .where(Patch.slide_id == slide_id)
-        .group_by(PatchLabel.label)
     )
+    if source:
+        query = query.where(PatchLabel.label_source == source)
+    query = query.group_by(PatchLabel.label)
+
+    result = await db.execute(query)
     rows = result.all()
     counts = {row.label: row.count for row in rows}
     total = sum(counts.values())

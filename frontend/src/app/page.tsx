@@ -114,7 +114,7 @@ export default function Dashboard() {
       n: 4,
       label: "Train",
       desc: "Build classifier from labels",
-      href: "/classifiers/new",
+      href: labelSlide ? `/slides/${labelSlide.id}` : "/classifiers/new",
       done: hasDoctorClassifiers,
       active: hasLabels && !hasDoctorClassifiers,
     },
@@ -216,10 +216,10 @@ export default function Dashboard() {
         {currentStep === 4 && (
           <div className="bg-emerald-50 rounded-lg p-4">
             <p className="text-sm text-emerald-800">
-              You have <strong>{labelCount} labels</strong>. Train a classifier now, then use active learning to refine it.
+              You have <strong>{labelCount} labels</strong>. Go to the slide and click <strong>Train</strong> in the labeling panel.
             </p>
             <Link
-              href="/classifiers/new"
+              href={labelSlide ? `/slides/${labelSlide.id}` : "/classifiers/new"}
               className="inline-flex items-center gap-2 mt-3 px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition font-medium text-sm"
             >
               Train Classifier

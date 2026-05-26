@@ -30,6 +30,7 @@ export type Classifier = {
   class_names: string[];
   n_classes: number;
   n_training_samples: number | null;
+  label_source: string | null;
   metrics: {
     auc?: number;
     roc_data?: { fpr: number[]; tpr: number[] };

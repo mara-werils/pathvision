@@ -103,9 +103,22 @@ export default function SlideDetailPage() {
 
   const hasEmbeddings = embeddingCount !== null && embeddingCount > 0;
   const isTiled = slide.status === "tiled";
+  const doctorClassifiers = classifiers.filter((c) => c.label_source === "interactive");
+  const hasDoctorClassifier = doctorClassifiers.length > 0;
 
   // Determine current workflow step for this slide
   const step = !isTiled ? 0 : !hasEmbeddings ? 1 : 2;
+
+  const refreshClassifiers = () => {
+    fetch(`${API_URL}/api/v1/classifiers`)
+      .then((r) => r.json())
+      .then((data: Classifier[]) => {
+        const ready = data.filter((c) => c.status === "ready");
+        setClassifiers(ready);
+        if (ready.length > 0 && !selectedClassifier) setSelectedClassifier(ready[0].id);
+      })
+      .catch(() => {});
+  };
 
   return (
     <div>
@@ -153,8 +166,8 @@ export default function SlideDetailPage() {
           <div className="flex items-center gap-6 text-sm">
             {[
               { label: "Embeddings", done: hasEmbeddings, active: step === 1 },
-              { label: "Label Patches", done: false, active: step === 2 && !classifiers.length },
-              { label: "Train & Predict", done: false, active: step === 2 && classifiers.length > 0 },
+              { label: "Label Patches", done: hasDoctorClassifier, active: step === 2 && !hasDoctorClassifier },
+              { label: "Train & Predict", done: false, active: step === 2 && hasDoctorClassifier },
             ].map((s, i) => (
               <div key={s.label} className="flex items-center gap-2">
                 {i > 0 && <div className={`w-6 h-px ${s.done ? "bg-green-400" : "bg-gray-200"}`} />}
@@ -240,7 +253,7 @@ export default function SlideDetailPage() {
 
       {/* Patch Labeling — THE MAIN SECTION */}
       {isTiled && hasEmbeddings && (
-        <PatchLabelingPanel slideId={id} classifiers={classifiers} />
+        <PatchLabelingPanel slideId={id} classifiers={classifiers} onClassifierTrained={refreshClassifiers} />
       )}
 
       {/* Prompt to generate embeddings if not yet done */}
